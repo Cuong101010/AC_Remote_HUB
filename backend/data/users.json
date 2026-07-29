@@ -1,0 +1,12 @@
+{
+  "testuser": {
+    "userId": "usr_0e7dc7465186",
+    "username": "testuser",
+    "displayName": "Test User",
+    "passwordHash": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92",
+    "createdAt": 1785292312.9130034,
+    "deviceIds": [
+      "ACIR-84CA57088304"
+    ]
+  }
+}

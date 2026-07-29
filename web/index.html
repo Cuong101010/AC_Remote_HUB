@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AC Remote Hub – Điều Khiển Điều Hòa Thông Minh</title>
+    <meta name="description" content="Hệ thống điều khiển điều hòa từ xa qua ESP32. Đăng nhập để quản lý thiết bị của bạn.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===================== AUTH SCREEN ===================== -->
+<div id="auth-screen" class="auth-overlay">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="auth-brand-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07l14.14-14.14"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="auth-title">AC Remote Hub</h1>
+                <p class="auth-subtitle">Điều khiển điều hòa thông minh</p>
+            </div>
+        </div>
+
+        <!-- Tab toggle -->
+        <div class="auth-tabs" id="auth-tabs">
+            <button class="auth-tab active" id="tab-login-btn" onclick="showAuthTab('login')">Đăng Nhập</button>
+            <button class="auth-tab" id="tab-register-btn" onclick="showAuthTab('register')">Tạo Tài Khoản</button>
+        </div>
+
+        <!-- LOGIN FORM -->
+        <form id="login-form" class="auth-form" autocomplete="on">
+            <div class="form-field">
+                <label for="login-username">Tên đăng nhập</label>
+                <input type="text" id="login-username" name="username" class="text-input" placeholder="Nhập tên đăng nhập" autocomplete="username" required>
+            </div>
+            <div class="form-field">
+                <label for="login-password">Mật khẩu</label>
+                <div class="password-input-wrapper">
+                    <input type="password" id="login-password" name="password" class="text-input" placeholder="Nhập mật khẩu" autocomplete="current-password" required>
+                    <button type="button" class="btn-toggle-password" onclick="togglePasswordVisibility('login-password', this)" title="Hiện/Ẩn mật khẩu">
+                        <svg class="eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg class="eye-off-icon hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="auth-error hidden" id="login-error"></div>
+            <button type="submit" class="btn-primary w-full" id="btn-login">
+                <span>Đăng Nhập</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            </button>
+        </form>
+
+        <!-- REGISTER FORM -->
+        <form id="register-form" class="auth-form hidden" autocomplete="on">
+            <div class="form-field">
+                <label for="reg-displayname">Họ tên / Biệt danh</label>
+                <input type="text" id="reg-displayname" class="text-input" placeholder="VD: Nguyễn Văn A" autocomplete="name">
+            </div>
+            <div class="form-field">
+                <label for="reg-username">Tên đăng nhập</label>
+                <input type="text" id="reg-username" name="username" class="text-input" placeholder="Tối thiểu 3 ký tự" autocomplete="username" required>
+            </div>
+            <div class="form-field">
+                <label for="reg-password">Mật khẩu</label>
+                <div class="password-input-wrapper">
+                    <input type="password" id="reg-password" name="password" class="text-input" placeholder="Tối thiểu 6 ký tự" autocomplete="new-password" required>
+                    <button type="button" class="btn-toggle-password" onclick="togglePasswordVisibility('reg-password', this)" title="Hiện/Ẩn mật khẩu">
+                        <svg class="eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg class="eye-off-icon hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="form-field">
+                <label for="reg-password2">Xác nhận mật khẩu</label>
+                <div class="password-input-wrapper">
+                    <input type="password" id="reg-password2" class="text-input" placeholder="Nhập lại mật khẩu" autocomplete="new-password" required>
+                    <button type="button" class="btn-toggle-password" onclick="togglePasswordVisibility('reg-password2', this)" title="Hiện/Ẩn mật khẩu">
+                        <svg class="eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        <svg class="eye-off-icon hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                    </button>
+                </div>
+            </div>
+            <div class="auth-error hidden" id="register-error"></div>
+            <button type="submit" class="btn-primary w-full" id="btn-register">
+                <span>Tạo Tài Khoản</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- ===================== MAIN APP ===================== -->
+<div id="app-screen" class="app-container hidden">
+
+    <!-- Header -->
+    <header class="app-header">
+        <div class="brand">
+            <div class="brand-icon">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07l14.14-14.14"/>
+                </svg>
+            </div>
+            <div class="brand-text">
+                <h1>AC Remote Hub</h1>
+                <span class="subtext" id="active-device-subtitle">Chưa chọn thiết bị</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="status-pill" id="backend-status-pill">
+                <span class="dot"></span>
+                <span id="backend-status-text">Online</span>
+            </div>
+            <div class="user-badge" id="user-badge" title="Tài khoản của bạn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span id="user-display-name">--</span>
+            </div>
+            <button class="icon-btn" id="btn-logout" title="Đăng xuất">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+        <button class="nav-btn active" data-tab="tab-remote">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                <line x1="12" y1="18" x2="12.01" y2="18"></line>
+            </svg>
+            <span>Điều Khiển</span>
+        </button>
+        <button class="nav-btn" data-tab="tab-learning">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+                <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <span>Học Lệnh IR</span>
+        </button>
+        <button class="nav-btn" data-tab="tab-devices">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            <span>Thiết Bị</span>
+        </button>
+    </nav>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden">
+        <span id="toast-message">Đã gửi lệnh thành công</span>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+
+        <!-- TAB 1: REMOTE CONTROL -->
+        <section id="tab-remote" class="tab-page active">
+            <!-- No device selected state -->
+            <div id="no-device-state" class="no-device-card hidden">
+                <div class="no-device-icon">📡</div>
+                <h3>Chưa có thiết bị nào</h3>
+                <p>Hãy ghép nối ESP32 của bạn trong tab <strong>Thiết Bị</strong> để bắt đầu điều khiển.</p>
+                <button class="btn-primary" onclick="switchToTab('tab-devices')" style="margin-top: 16px;">
+                    Đến Thiết Bị
+                </button>
+            </div>
+
+            <div id="remote-content" class="remote-card">
+                <!-- Status Header -->
+                <div class="remote-header">
+                    <div class="esp-status">
+                        <span class="status-indicator" id="esp-status-dot"></span>
+                        <span class="status-name" id="esp-device-name">ESP32 Controller</span>
+                    </div>
+                    <div class="esp-info" id="esp-meta-info">IP: -- | RSSI: -- dBm</div>
+                </div>
+
+                <!-- AC Remote Profile Selection Bar -->
+                <div class="ac-profile-bar">
+                    <div class="profile-select-wrapper flex-1">
+                        <label class="group-label">Chọn Điều Hòa (Profile)</label>
+                        <select id="select-ac-profile" class="select-input">
+                            <option value="default_profile">Điều Hòa Mặc Định</option>
+                        </select>
+                    </div>
+                    <button class="btn-secondary" id="btn-add-profile" style="margin-top: 18px;" title="Thêm điều hòa mới">+ Thêm Mới</button>
+                </div>
+
+                <div class="auto-protocol-badge" id="auto-protocol-badge">
+                    <span class="badge-icon">✨</span>
+                    <span id="auto-protocol-text">Tự động nhận diện Hãng: ELECTRA_AC</span>
+                </div>
+
+                <!-- Temperature & Main Power Display -->
+                <div class="temp-display-container">
+                    <button class="btn-power" id="btn-power" title="Bật/Tắt nguồn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                            <line x1="12" y1="2" x2="12" y2="12"></line>
+                        </svg>
+                    </button>
+                    <div class="temp-readout">
+                        <span class="temp-value" id="temp-value">26</span>
+                        <span class="temp-unit">°C</span>
+                    </div>
+                    <div class="temp-adjust">
+                        <button class="btn-temp" id="btn-temp-plus" title="Tăng nhiệt độ">+</button>
+                        <button class="btn-temp" id="btn-temp-minus" title="Giảm nhiệt độ">–</button>
+                    </div>
+                </div>
+
+                <!-- AC Mode Selection -->
+                <div class="control-group">
+                    <label class="group-label">Chế Độ (Mode)</label>
+                    <div class="segmented-control mode-selector">
+                        <button class="seg-btn active" data-mode="cool"><span class="icon">❄️</span><span>Cool</span></button>
+                        <button class="seg-btn" data-mode="heat"><span class="icon">☀️</span><span>Heat</span></button>
+                        <button class="seg-btn" data-mode="dry"><span class="icon">💧</span><span>Dry</span></button>
+                        <button class="seg-btn" data-mode="fan"><span class="icon">🌀</span><span>Fan</span></button>
+                        <button class="seg-btn" data-mode="auto"><span class="icon">🤖</span><span>Auto</span></button>
+                    </div>
+                </div>
+
+                <!-- Fan Speed Selection -->
+                <div class="control-group">
+                    <label class="group-label">Tốc Độ Gió (Fan Speed)</label>
+                    <div class="segmented-control fan-selector">
+                        <button class="seg-btn active" data-fan="auto">Auto</button>
+                        <button class="seg-btn" data-fan="min">Min</button>
+                        <button class="seg-btn" data-fan="low">Low</button>
+                        <button class="seg-btn" data-fan="medium">Med</button>
+                        <button class="seg-btn" data-fan="high">High</button>
+                        <button class="seg-btn" data-fan="max">Max</button>
+                    </div>
+                </div>
+
+                <!-- Swing Controls -->
+                <div class="control-row">
+                    <div class="control-group flex-1">
+                        <label class="group-label">Đảo Gió Dọc (Swing V)</label>
+                        <select id="select-swing-v" class="select-input">
+                            <option value="off">Tắt (Off)</option>
+                            <option value="auto">Tự động (Auto)</option>
+                            <option value="highest">Cao nhất</option>
+                            <option value="high">Cao</option>
+                            <option value="middle">Giữa</option>
+                            <option value="low">Thấp</option>
+                            <option value="lowest">Thấp nhất</option>
+                        </select>
+                    </div>
+                    <div class="control-group flex-1">
+                        <label class="group-label">Đảo Gió Ngang (Swing H)</label>
+                        <select id="select-swing-h" class="select-input">
+                            <option value="off">Tắt (Off)</option>
+                            <option value="auto">Tự động (Auto)</option>
+                            <option value="middle">Giữa</option>
+                            <option value="left">Trái</option>
+                            <option value="right">Phải</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Advanced Toggle Switches -->
+                <div class="toggles-grid">
+                    <label class="toggle-card"><input type="checkbox" id="chk-turbo"><span class="toggle-label">Turbo ⚡</span></label>
+                    <label class="toggle-card"><input type="checkbox" id="chk-quiet"><span class="toggle-label">Quiet 🌙</span></label>
+                    <label class="toggle-card"><input type="checkbox" id="chk-econo"><span class="toggle-label">Econo 🍃</span></label>
+                    <label class="toggle-card"><input type="checkbox" id="chk-light"><span class="toggle-label">Đèn Led 💡</span></label>
+                </div>
+
+                <!-- Protocol Selection -->
+                <div class="control-group protocol-box">
+                    <label class="group-label">Giao Thức Mã Hóa IR (Protocol)</label>
+                    <select id="select-protocol" class="select-input">
+                        <option value="ELECTRA_AC">ELECTRA_AC (Mặc định)</option>
+                        <option value="DAIKIN">DAIKIN</option>
+                        <option value="PANASONIC_AC">PANASONIC_AC</option>
+                        <option value="MITSUBISHI_AC">MITSUBISHI_AC</option>
+                        <option value="GREE">GREE</option>
+                        <option value="LG">LG / LG2</option>
+                        <option value="TOSHIBA_AC">TOSHIBA_AC</option>
+                        <option value="MEDIA">MIDEA / MEDIA</option>
+                        <option value="FUJITSU_AC">FUJITSU_AC</option>
+                        <option value="SAMSUNG_AC">SAMSUNG_AC</option>
+                        <option value="RAW">RAW Timing Signal</option>
+                    </select>
+                </div>
+
+                <button class="btn-primary" id="btn-send-ac-state">
+                    <span>Gửi Lệnh Lên Điều Hòa</span>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
+            </div>
+        </section>
+
+        <!-- TAB 2: IR LEARNING -->
+        <section id="tab-learning" class="tab-page">
+            <div class="learning-card">
+                <div class="card-title">
+                    <h2>Học Tín Hiệu IR Từ Remote Gốc</h2>
+                    <p class="card-desc">Gửi lệnh học từ xa tới ESP32, sau đó hướng remote gốc vào mắt đọc HX1838 để phân tích tín hiệu.</p>
+                </div>
+
+                <div class="learning-form">
+                    <div class="form-group">
+                        <label>Tên Hồ Sơ (Profile ID)</label>
+                        <input type="text" id="learn-profile-id" class="text-input" value="my_ac_remote">
+                    </div>
+                    <div class="form-group">
+                        <label>Hành Động / Nút Cần Học</label>
+                        <input type="text" id="learn-expected-action" class="text-input" value="POWER_ON_COOL_26">
+                    </div>
+
+                    <div class="learning-status-box hidden" id="learning-status-box">
+                        <div class="pulse-indicator"></div>
+                        <div class="status-info">
+                            <strong id="learning-status-title">Đang chờ tín hiệu IR...</strong>
+                            <span id="learning-status-sub">Hãy bấm nút trên remote gốc hướng về phía mắt nhận HX1838 trên ESP32.</span>
+                        </div>
+                        <button class="btn-secondary danger" id="btn-cancel-learn">Hủy Học</button>
+                    </div>
+
+                    <button class="btn-primary" id="btn-start-learn">
+                        <span>Bắt Đầu Học Lệnh</span>
+                    </button>
+                </div>
+
+                <div class="learned-signals-section">
+                    <h3>Danh Sách Lệnh Đã Học</h3>
+                    <div class="signals-list" id="signals-list">
+                        <div class="empty-state">Chưa có dữ liệu lệnh IR được học.</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 3: DEVICES -->
+        <section id="tab-devices" class="tab-page">
+            <div class="devices-card">
+                <div class="card-header">
+                    <h2>Thiết Bị ESP32 Của Bạn</h2>
+                    <button class="btn-secondary" id="btn-refresh-devices">Làm mới</button>
+                </div>
+
+                <div class="pairing-box">
+                    <h3>Ghép Nối Thiết Bị Mới</h3>
+                    <p class="card-desc" style="margin-bottom: 10px;">Nhập Device ID hoặc Pairing Code (6 số) hiển thị trên Serial Monitor của ESP32.</p>
+                    <div class="pairing-form">
+                        <input type="text" id="pair-code-input" class="text-input" placeholder="Device ID hoặc Mã 6 số">
+                        <button class="btn-primary" id="btn-pair-submit">Ghép Nối</button>
+                    </div>
+                </div>
+
+                <div class="device-grid" id="device-grid">
+                    <div class="empty-state">Đang tải danh sách thiết bị...</div>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
