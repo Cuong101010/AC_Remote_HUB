@@ -5,7 +5,10 @@ import uuid
 import hashlib
 import threading
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+if "VERCEL" in os.environ:
+    DATA_DIR = "/tmp/data"
+else:
+    DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 
 class Storage:
     def __init__(self):
