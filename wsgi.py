@@ -1,14 +1,15 @@
 import os
 import sys
 
-# Đảm bảo thư mục backend đứng đầu sys.path để import storage.py và app.py chuẩn xác
+# Nạp cả thư mục dự án và thư mục backend vào sys.path
 project_home = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.join(project_home, "backend")
 
-if backend_dir not in sys.path:
-    sys.path.insert(0, backend_dir)
+for path in [backend_dir, project_home]:
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
-if project_home not in sys.path:
-    sys.path.insert(0, project_home)
-
-from app import app as application
+try:
+    from app import app as application
+except ImportError:
+    from backend.app import app as application

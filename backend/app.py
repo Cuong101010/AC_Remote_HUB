@@ -331,7 +331,10 @@ def index():
 
 @app.route("/<path:filename>")
 def serve_static(filename):
-    return send_from_directory(WEB_DIR, filename)
+    filepath = os.path.join(WEB_DIR, filename)
+    if os.path.isfile(filepath):
+        return send_from_directory(WEB_DIR, filename)
+    return jsonify({"error": "Not found"}), 404
 
 # ============================================================
 if __name__ == "__main__":
