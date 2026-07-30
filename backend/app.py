@@ -5,14 +5,27 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
 from storage import storage
+
+try:
+    from flask_cors import CORS
+    has_cors = True
+except ImportError:
+    has_cors = False
 
 BOOTSTRAP_KEY = os.getenv("DEVICE_BOOTSTRAP_KEY", "CHANGE_ME_BOOTSTRAP_KEY")
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 
 app = Flask(__name__, static_folder=WEB_DIR)
-CORS(app)
+if has_cors:
+    CORS(app)
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+    return response
 
 # ============================================================
 # AUTH HELPERS
