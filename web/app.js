@@ -380,11 +380,15 @@ function renderProfilesList() {
         return;
     }
 
-    select.innerHTML = state.profiles.map(p => `
+    select.innerHTML = state.profiles.map(p => {
+        const name = p.name || p.profileId;
+        const displayName = name.includes("(") ? name : `${name} (${p.protocol || "ELECTRA_AC"})`;
+        return `
         <option value="${p.profileId}" ${p.profileId === state.activeProfileId ? "selected" : ""}>
-            ❄️ ${p.name || p.profileId} (${p.protocol || "ELECTRA_AC"})
+            ❄️ ${displayName}
         </option>
-    `).join("");
+    `;
+    }).join("");
 
     if (!state.activeProfileId && state.profiles.length > 0) {
         switchProfile(state.profiles[0].profileId);

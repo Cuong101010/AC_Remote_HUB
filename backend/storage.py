@@ -351,13 +351,17 @@ class Storage:
             if protocol and protocol != "UNKNOWN":
                 prof["protocol"]    = protocol
                 prof["controlType"] = "NATIVE"
-                if not prof.get("name") or prof["name"].startswith("Điều Hòa #"):
+                if not prof.get("name"):
                     prof["name"] = f"Điều Hòa {protocol}"
+                elif prof["name"].startswith("Điều Hòa #") and "(" not in prof["name"]:
+                    prof["name"] = f"{prof['name']} ({protocol})"
             else:
                 if not prof.get("controlType"):
                     prof["controlType"] = "RAW"
-                if not prof.get("name") or prof["name"].startswith("Điều Hòa #"):
+                if not prof.get("name"):
                     prof["name"] = "Điều Hòa (Tín Hiệu RAW)"
+                elif prof["name"].startswith("Điều Hòa #") and "(" not in prof["name"]:
+                    prof["name"] = f"{prof['name']} (RAW)"
 
             action_name = signal_data.get("expectedAction", "ACTION_DEFAULT")
             signals = prof.get("signals", [])
