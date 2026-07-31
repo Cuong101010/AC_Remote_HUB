@@ -1385,16 +1385,17 @@ bool sendNativeAcState(JsonObject command, String &errorMessage) {
     profileId == previousProfileId &&
     protocol == previousProtocol;
 
-  const bool wasLearning = learning.active;
-  if (wasLearning) {
-    irReceiver.disableIRIn();
-  }
+  // Tắt mắt thu IR trước khi phát để tránh hiện tượng tự nhại lại (self-echo)
+  irReceiver.disableIRIn();
+
   const bool sent = universalAc.sendAc(
     desired,
     canUsePrevious ? &previousAcState : nullptr
   );
 
-  if (wasLearning) {
+  // Đợi 50ms cho chùm sóng phát tan hết rồi mới mở lại mắt thu
+  delay(50);
+  if (!learning.active) {
     irReceiver.enableIRIn();
     irReceiver.resume();
   }
@@ -1431,10 +1432,8 @@ bool sendRawSignal(JsonObject command, String &errorMessage) {
     }
   }
 
-  const bool wasLearning = learning.active;
-  if (wasLearning) {
-    irReceiver.disableIRIn();
-  }
+  // Tắt mắt thu IR trước khi phát để tránh hiện tượng tự nhại lại (self-echo)
+  irReceiver.disableIRIn();
 
   bool sentSuccess = false;
   if (protocol != decode_type_t::UNKNOWN && bits > 0) {
@@ -1475,7 +1474,9 @@ bool sendRawSignal(JsonObject command, String &errorMessage) {
     }
   }
 
-  if (wasLearning) {
+  // Đợi 50ms cho sóng phát tan hết rồi mới kích hoạt lại mắt thu
+  delay(50);
+  if (!learning.active) {
     irReceiver.enableIRIn();
     irReceiver.resume();
   }
