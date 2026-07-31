@@ -329,6 +329,21 @@ class Storage:
                 return True
             return False
 
+    def delete_learned_signal(self, device_id, profile_id, action_name):
+        with self.lock:
+            prof = self.profiles.get(profile_id)
+            if not prof or prof.get("deviceId") != device_id:
+                return False
+            signals = prof.get("signals", [])
+            initial_len = len(signals)
+            new_signals = [s for s in signals if s.get("expectedAction") != action_name and s.get("action") != action_name]
+            if len(new_signals) < initial_len:
+                prof["signals"] = new_signals
+                prof["updatedAt"] = time.time()
+                self._save_json(self.profiles_file, self.profiles)
+                return True
+            return False
+
     def save_learned_signal(self, device_id, profile_id, signal_data):
         with self.lock:
             if profile_id not in self.profiles:

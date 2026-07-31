@@ -529,7 +529,15 @@ function renderAcStateUI() {
     const sp  = document.getElementById("select-protocol");
     if (swV) swV.value = state.acState.swingV;
     if (swH) swH.value = state.acState.swingH;
-    if (sp)  sp.value  = state.acState.protocol;
+    if (sp) {
+        if (state.acState.protocol && !Array.from(sp.options).some(opt => opt.value === state.acState.protocol)) {
+            const newOpt = document.createElement("option");
+            newOpt.value = state.acState.protocol;
+            newOpt.textContent = state.acState.protocol;
+            sp.appendChild(newOpt);
+        }
+        sp.value = state.acState.protocol;
+    }
 
     const chkTurbo = document.getElementById("chk-turbo");
     const chkQuiet = document.getElementById("chk-quiet");
@@ -680,16 +688,22 @@ async function loadLearnedProfiles() {
     let html = "";
     data.profiles.forEach(prof => {
         (prof.signals || []).forEach(sig => {
+            const actionName = sig.action || sig.expectedAction;
             html += `
                 <div class="signal-item">
                     <div class="signal-info">
-                        <h4>${sig.action || sig.expectedAction}</h4>
+                        <h4>${actionName}</h4>
                         <p>Protocol: <strong>${sig.protocol}</strong> | Bits: ${sig.bits || "--"} | Control: <strong>${sig.controlType || "NATIVE"}</strong></p>
                         <p>Code: <code style="color: var(--accent);">${sig.code || sig.stateHex || "RAW Signal"}</code></p>
                     </div>
-                    <button class="btn-secondary" onclick="window.sendLearnedSignal('${prof.profileId}', '${sig.action}')">
-                        Phát IR
-                    </button>
+                    <div class="signal-actions" style="display: flex; gap: 6px; align-items: center;">
+                        <button class="btn-secondary" onclick="window.sendLearnedSignal('${prof.profileId}', '${actionName}')">
+                            Phát IR
+                        </button>
+                        <button class="btn-secondary danger" onclick="window.deleteLearnedSignal('${prof.profileId}', '${actionName}')">
+                            🗑️ Xóa
+                        </button>
+                    </div>
                 </div>
             `;
         });
@@ -697,8 +711,84 @@ async function loadLearnedProfiles() {
     list.innerHTML = html || `<div class="empty-state">Chưa có lệnh IR nào được học.</div>`;
 }
 
-window.sendLearnedSignal = async (profileId, action) => {
-    showToast(`Đang phát lệnh học: ${action}`);
+window.sendLearnedSignal = async (profileId, actionName) => {
+    if (!state.activeDeviceId) {
+        showToast("Chưa chọn thiết bị ESP32!", true);
+        return;
+    }
+
+    let signalToTransmit = null;
+    const targetProf = state.profiles.find(p => p.profileId === profileId);
+    if (targetProf && targetProf.signals) {
+        signalToTransmit = targetProf.signals.find(s => (s.action === actionName || s.expectedAction === actionName));
+    }
+
+    if (!signalToTransmit) {
+        const data = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/profiles`);
+        if (data && data.profiles) {
+            const p = data.profiles.find(x => x.profileId === profileId);
+            if (p && p.signals) {
+                signalToTransmit = p.signals.find(s => (s.action === actionName || s.expectedAction === actionName));
+            }
+        }
+    }
+
+    showToast(`Đang gửi tín hiệu IR cho lệnh: ${actionName}...`);
+
+    let res = null;
+    if (signalToTransmit && signalToTransmit.rawUs && signalToTransmit.rawUs.length > 0) {
+        res = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/send-raw`, {
+            method: "POST",
+            body: JSON.stringify({
+                profileId: profileId,
+                rawUs: signalToTransmit.rawUs,
+                frequencyKhz: 38
+            })
+        });
+    } else if (signalToTransmit && signalToTransmit.controlType === "NATIVE" && signalToTransmit.commonState) {
+        const payload = {
+            ...signalToTransmit.commonState,
+            profileId: profileId,
+            protocol: signalToTransmit.protocol
+        };
+        res = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/control`, {
+            method: "POST",
+            body: JSON.stringify(payload)
+        });
+    } else {
+        showToast("Không tìm thấy dữ liệu tín hiệu của lệnh này", true);
+        return;
+    }
+
+    if (res && res.success) {
+        showToast(`Đã gửi lệnh phát IR tới ESP32!`);
+        pollCommandStatus(res.command.id);
+    } else {
+        showToast(res?.error || "Không thể gửi lệnh phát IR", true);
+    }
+};
+
+window.deleteLearnedSignal = async (profileId, actionName) => {
+    if (!state.activeDeviceId) {
+        showToast("Chưa chọn thiết bị ESP32!", true);
+        return;
+    }
+
+    if (!confirm(`Bạn có chắc chắn muốn xóa lệnh "${actionName}" không?`)) {
+        return;
+    }
+
+    const res = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/profiles/${profileId}/signals/${encodeURIComponent(actionName)}`, {
+        method: "DELETE"
+    });
+
+    if (res && res.success) {
+        showToast(`Đã xóa lệnh "${actionName}" thành công!`);
+        await loadProfiles();
+        loadLearnedProfiles();
+    } else {
+        showToast(res?.error || "Không thể xóa lệnh này", true);
+    }
 };
 
 // =====================================================

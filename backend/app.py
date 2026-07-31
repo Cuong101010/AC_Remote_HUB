@@ -331,6 +331,19 @@ def web_delete_profile(profile_id):
         return jsonify({"success": True})
     return jsonify({"error": "Profile not found"}), 404
 
+@app.route("/api/v1/web/devices/<device_id>/profiles/<profile_id>/signals/<action_name>", methods=["DELETE"])
+def web_delete_signal(device_id, profile_id, action_name):
+    user, err_resp, err_code = require_user()
+    if err_resp:
+        return err_resp, err_code
+    if device_id not in storage.get_user_device_ids(user):
+        return jsonify({"error": "Bạn không có quyền với thiết bị này"}), 403
+
+    ok = storage.delete_learned_signal(device_id, profile_id, action_name)
+    if ok:
+        return jsonify({"success": True})
+    return jsonify({"error": "Không tìm thấy lệnh cần xóa"}), 404
+
 @app.route("/api/v1/web/commands/<command_id>/status", methods=["GET"])
 def web_command_status(command_id):
     user, err_resp, err_code = require_user()

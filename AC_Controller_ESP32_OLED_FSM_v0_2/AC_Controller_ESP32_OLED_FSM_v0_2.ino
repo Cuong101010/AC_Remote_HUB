@@ -400,9 +400,51 @@ void renderLearningOkScreen() {
 void renderDisplay() {
   // [BỎ OLED TẠM THỜI] Chuyển thông tin trạng thái & ID ra Serial Monitor
   static DisplayState lastStatePrinted = static_cast<DisplayState>(255);
+  static bool lastCloudPrinted = false;
+  static uint8_t lastWifiPrinted = 255;
+  static String lastCommandTypePrinted = "";
+  static bool lastCommandPowerPrinted = false;
+  static int lastCommandTempPrinted = 0;
+  static String lastCommandModePrinted = "";
+  static bool lastCommandKnownPrinted = false;
+  static bool lastCommandOkPrinted = false;
+  static String lastLearnedProtocolPrinted = "";
+  static uint16_t lastLearnedBitsPrinted = 0;
 
-  if (displayState != lastStatePrinted || displayDirty) {
+  const uint8_t currentWifi = WiFi.status();
+
+  bool needPrint = (displayState != lastStatePrinted) ||
+                   (cloudConnected != lastCloudPrinted) ||
+                   (currentWifi != lastWifiPrinted);
+
+  if (displayState == DisplayState::STATE_EVENT_CMD) {
+    if (commandScreen.commandType != lastCommandTypePrinted ||
+        commandScreen.power != lastCommandPowerPrinted ||
+        commandScreen.temperature != lastCommandTempPrinted ||
+        commandScreen.mode != lastCommandModePrinted ||
+        commandScreen.resultKnown != lastCommandKnownPrinted ||
+        commandScreen.resultOk != lastCommandOkPrinted) {
+      needPrint = true;
+    }
+  } else if (displayState == DisplayState::STATE_EVENT_LEARN_OK) {
+    if (learnedProtocolScreen != lastLearnedProtocolPrinted ||
+        learnedBitsScreen != lastLearnedBitsPrinted) {
+      needPrint = true;
+    }
+  }
+
+  if (needPrint) {
     lastStatePrinted = displayState;
+    lastCloudPrinted = cloudConnected;
+    lastWifiPrinted = currentWifi;
+    lastCommandTypePrinted = commandScreen.commandType;
+    lastCommandPowerPrinted = commandScreen.power;
+    lastCommandTempPrinted = commandScreen.temperature;
+    lastCommandModePrinted = commandScreen.mode;
+    lastCommandKnownPrinted = commandScreen.resultKnown;
+    lastCommandOkPrinted = commandScreen.resultOk;
+    lastLearnedProtocolPrinted = learnedProtocolScreen;
+    lastLearnedBitsPrinted = learnedBitsScreen;
 
     Serial.println();
     Serial.printf(">>> [STATUS MONITOR] Device ID: %s | Pairing Code: %s | State: ",
