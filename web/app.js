@@ -632,7 +632,7 @@ document.getElementById("btn-start-learn").addEventListener("click", async () =>
         state.learningSession = { active: true, commandId: res.command.id, profileId };
         document.getElementById("learning-status-box").classList.remove("hidden");
         showToast("Đã kích hoạt chế độ học IR trên ESP32.");
-        pollLearningStatus(profileId);
+        pollLearningStatus(profileId, res.command.id);
     } else {
         showToast("Không thể bắt đầu học IR", true);
     }
@@ -646,29 +646,47 @@ document.getElementById("btn-cancel-learn").addEventListener("click", async () =
     showToast("Đã hủy chế độ học IR.");
 });
 
-async function pollLearningStatus(profileId) {
+async function pollLearningStatus(profileId, commandId) {
     let count = 0;
     const timer = setInterval(async () => {
         count++;
         if (!state.learningSession.active) { clearInterval(timer); return; }
 
-        const data = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/profiles`);
-        if (data && data.profiles) {
-            const targetProf = data.profiles.find(p => p.profileId === profileId);
-            if (targetProf && targetProf.signals && targetProf.signals.length > 0) {
-                clearInterval(timer);
-                state.learningSession.active = false;
-                document.getElementById("learning-status-box").classList.add("hidden");
-                await loadProfiles();
-                switchProfile(profileId);
-                showToast(`🎉 Tự động nhận diện thành công: Hãng ${targetProf.protocol || "NATIVE"}!`);
-                loadLearnedProfiles();
+        if (commandId) {
+            const statusRes = await apiFetch(`/api/v1/web/commands/${commandId}/status`);
+            if (statusRes && statusRes.command) {
+                const cmd = statusRes.command;
+                const status = (cmd.status || "").toLowerCase();
+                const ackStatus = (cmd.ackStatus || "").toLowerCase();
+
+                if (status === "success" || status === "completed" || ackStatus === "completed") {
+                    clearInterval(timer);
+                    state.learningSession.active = false;
+                    document.getElementById("learning-status-box").classList.add("hidden");
+                    await loadProfiles();
+                    if (state.activeProfileId !== profileId) {
+                        switchProfile(profileId);
+                    }
+                    await loadLearnedProfiles();
+                    const proto = cmd.result?.protocol || "NATIVE";
+                    showToast(`🎉 Học lệnh thành công: Hãng ${proto}!`);
+                    return;
+                } else if (status === "failed" || ackStatus === "failed" || status === "timeout") {
+                    clearInterval(timer);
+                    state.learningSession.active = false;
+                    document.getElementById("learning-status-box").classList.add("hidden");
+                    showToast("Học lệnh thất bại hoặc đã hết thời gian chờ.", true);
+                    return;
+                }
             }
         }
-        if (count > 30) {
+
+        if (count > 32) {
             clearInterval(timer);
             state.learningSession.active = false;
             document.getElementById("learning-status-box").classList.add("hidden");
+            await loadProfiles();
+            await loadLearnedProfiles();
             showToast("Hết thời gian học IR (Timeout).", true);
         }
     }, 1500);
