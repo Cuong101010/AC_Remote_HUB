@@ -754,12 +754,15 @@ window.sendLearnedSignal = async (profileId, actionName) => {
     showToast(`Đang gửi tín hiệu IR cho lệnh: ${actionName}...`);
 
     let res = null;
-    if (signalToTransmit && signalToTransmit.rawUs && signalToTransmit.rawUs.length > 0) {
+    if (signalToTransmit) {
         res = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/send-raw`, {
             method: "POST",
             body: JSON.stringify({
                 profileId: profileId,
-                rawUs: signalToTransmit.rawUs,
+                rawUs: signalToTransmit.rawUs || [],
+                protocol: signalToTransmit.protocol || "",
+                code: signalToTransmit.code || "",
+                bits: signalToTransmit.bits || 0,
                 frequencyKhz: 38
             })
         });

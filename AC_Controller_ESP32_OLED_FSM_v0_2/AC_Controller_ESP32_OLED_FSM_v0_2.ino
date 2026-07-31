@@ -1394,46 +1394,70 @@ bool sendNativeAcState(JsonObject command, String &errorMessage) {
 }
 
 bool sendRawSignal(JsonObject command, String &errorMessage) {
-  JsonArray rawArray = command["rawUs"].as<JsonArray>();
+  const String protocolStr = command["protocol"] | "";
+  const String codeStr = command["code"] | "";
+  const uint16_t bits = command["bits"] | 0;
 
-  if (rawArray.isNull() || rawArray.size() == 0) {
-    errorMessage = "rawUs is empty";
-    return false;
-  }
+  decode_type_t protocol = strToDecodeType(protocolStr.c_str());
+  uint64_t codeVal = 0;
 
-  if (rawArray.size() > 1200) {
-    errorMessage = "rawUs is too long";
-    return false;
-  }
-
-  const uint16_t frequencyKhz = command["frequencyKhz"] | 38;
-  const size_t count = rawArray.size();
-
-  uint16_t *rawData = new (std::nothrow) uint16_t[count];
-  if (rawData == nullptr) {
-    errorMessage = "Not enough heap for raw data";
-    return false;
-  }
-
-  size_t index = 0;
-  for (JsonVariant value : rawArray) {
-    const uint32_t timing = value.as<uint32_t>();
-    rawData[index++] = static_cast<uint16_t>(
-      timing > 65535UL ? 65535UL : timing
-    );
+  if (!codeStr.isEmpty()) {
+    if (codeStr.startsWith("0x") || codeStr.startsWith("0X")) {
+      codeVal = strtoull(codeStr.c_str() + 2, NULL, 16);
+    } else {
+      codeVal = strtoull(codeStr.c_str(), NULL, 10);
+    }
   }
 
   const bool wasLearning = learning.active;
   if (wasLearning) {
     irReceiver.disableIRIn();
   }
-  irSender.sendRaw(rawData, count, frequencyKhz);
+
+  bool sentSuccess = false;
+  if (protocol != decode_type_t::UNKNOWN && codeVal > 0 && bits > 0) {
+    sentSuccess = irSender.send(protocol, codeVal, bits);
+    if (sentSuccess) {
+      Serial.printf("[IR TRANSMIT] Sent via Protocol=%s, Code=0x%llX, Bits=%d\n", protocolStr.c_str(), codeVal, bits);
+    }
+  }
+
+  if (!sentSuccess) {
+    JsonArray rawArray = command["rawUs"].as<JsonArray>();
+    if (!rawArray.isNull() && rawArray.size() > 0 && rawArray.size() <= 1200) {
+      const uint16_t frequencyKhz = command["frequencyKhz"] | 38;
+      const size_t count = rawArray.size();
+      uint16_t *rawData = new (std::nothrow) uint16_t[count];
+      if (rawData != nullptr) {
+        size_t index = 0;
+        for (JsonVariant value : rawArray) {
+          const uint32_t timing = value.as<uint32_t>();
+          rawData[index++] = static_cast<uint16_t>(timing > 65535UL ? 65535UL : timing);
+        }
+        irSender.sendRaw(rawData, count, frequencyKhz);
+        delete[] rawData;
+        sentSuccess = true;
+        Serial.printf("[IR TRANSMIT] Sent via RAW us (count=%d)\n", count);
+      } else {
+        errorMessage = "Not enough heap for raw data";
+      }
+    } else {
+      errorMessage = "rawUs is empty or invalid";
+    }
+  }
+
   if (wasLearning) {
     irReceiver.enableIRIn();
     irReceiver.resume();
   }
 
-  delete[] rawData;
+  if (!sentSuccess) {
+    if (errorMessage.isEmpty()) {
+      errorMessage = "Could not send IR signal";
+    }
+    return false;
+  }
+
   return true;
 }
 
