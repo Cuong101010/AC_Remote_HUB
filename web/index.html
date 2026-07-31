@@ -191,11 +191,12 @@
                         </select>
                     </div>
                     <button class="btn-secondary" id="btn-add-profile" style="margin-top: 18px;" title="Thêm điều hòa mới">+ Thêm Mới</button>
+                    <button class="btn-secondary danger" id="btn-delete-profile" style="margin-top: 18px;" title="Xóa điều hòa này">🗑️ Xóa</button>
                 </div>
 
                 <div class="auto-protocol-badge" id="auto-protocol-badge">
                     <span class="badge-icon">✨</span>
-                    <span id="auto-protocol-text">Tự động nhận diện Hãng: ELECTRA_AC</span>
+                    <span id="auto-protocol-text">Chưa nhận diện Hãng</span>
                 </div>
 
                 <!-- Temperature & Main Power Display -->
@@ -279,7 +280,8 @@
                 <div class="control-group protocol-box">
                     <label class="group-label">Giao Thức Mã Hóa IR (Protocol)</label>
                     <select id="select-protocol" class="select-input">
-                        <option value="ELECTRA_AC">ELECTRA_AC (Mặc định)</option>
+                        <option value="" disabled selected>-- Chưa nhận diện Hãng --</option>
+                        <option value="ELECTRA_AC">ELECTRA_AC</option>
                         <option value="DAIKIN">DAIKIN</option>
                         <option value="PANASONIC_AC">PANASONIC_AC</option>
                         <option value="MITSUBISHI_AC">MITSUBISHI_AC</option>

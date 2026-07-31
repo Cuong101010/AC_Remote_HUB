@@ -320,6 +320,12 @@ def web_delete_profile(profile_id):
     user, err_resp, err_code = require_user()
     if err_resp:
         return err_resp, err_code
+    prof = storage.profiles.get(profile_id)
+    if not prof:
+        return jsonify({"error": "Không tìm thấy điều hòa"}), 404
+    if prof.get("deviceId") not in storage.get_user_device_ids(user):
+        return jsonify({"error": "Bạn không có quyền xóa điều hòa này"}), 403
+
     ok = storage.delete_profile(profile_id)
     if ok:
         return jsonify({"success": True})

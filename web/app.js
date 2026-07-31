@@ -17,7 +17,7 @@ let state = {
         power: true, temperature: 26, mode: "cool",
         fan: "auto", swingV: "off", swingH: "off",
         turbo: false, quiet: false, econo: false, light: false,
-        protocol: "ELECTRA_AC"
+        protocol: ""
     },
     learningSession: { active: false, commandId: null, profileId: null }
 };
@@ -375,14 +375,22 @@ function renderProfilesList() {
     if (!select) return;
 
     if (state.profiles.length === 0) {
-        select.innerHTML = `<option value="default_profile">Điều Hòa Mặc Định (Chưa quét)</option>`;
-        state.activeProfileId = "default_profile";
+        select.innerHTML = `<option value="">-- Chưa có điều hòa --</option>`;
+        state.activeProfileId = null;
+        applyProfileSettings(null);
         return;
     }
 
     select.innerHTML = state.profiles.map(p => {
         const name = p.name || p.profileId;
-        const displayName = name.includes("(") ? name : `${name} (${p.protocol || "ELECTRA_AC"})`;
+        let displayName;
+        if (name.includes("(")) {
+            displayName = name;
+        } else if (p.protocol && p.protocol !== "UNKNOWN") {
+            displayName = `${name} (${p.protocol})`;
+        } else {
+            displayName = `${name} (Chưa nhận diện)`;
+        }
         return `
         <option value="${p.profileId}" ${p.profileId === state.activeProfileId ? "selected" : ""}>
             ❄️ ${displayName}
@@ -394,13 +402,21 @@ function renderProfilesList() {
         switchProfile(state.profiles[0].profileId);
     } else if (state.activeProfileId) {
         const prof = state.profiles.find(p => p.profileId === state.activeProfileId);
-        if (prof) applyProfileSettings(prof);
+        if (prof) {
+            applyProfileSettings(prof);
+        } else if (state.profiles.length > 0) {
+            switchProfile(state.profiles[0].profileId);
+        } else {
+            state.activeProfileId = null;
+            applyProfileSettings(null);
+        }
     }
 }
 
 document.getElementById("select-ac-profile").addEventListener("change", e => switchProfile(e.target.value));
 
 function switchProfile(profileId) {
+    if (!profileId) return;
     state.activeProfileId = profileId;
     const prof = state.profiles.find(p => p.profileId === profileId);
     if (prof) {
@@ -411,17 +427,18 @@ function switchProfile(profileId) {
 
 function applyProfileSettings(prof) {
     const badge = document.getElementById("auto-protocol-text");
-    if (prof.protocol && prof.protocol !== "UNKNOWN") {
+    if (prof && prof.protocol && prof.protocol !== "UNKNOWN") {
         state.acState.protocol = prof.protocol;
         if (badge) badge.textContent = `✨ Tự động nhận diện Hãng: ${prof.protocol}`;
-    } else if (prof.controlType === "RAW") {
+    } else if (prof && prof.controlType === "RAW") {
         state.acState.protocol = "RAW";
         if (badge) badge.textContent = `✨ Chế độ phát Tín Hiệu RAW (Hãng lạ)`;
     } else {
-        if (badge) badge.textContent = `✨ Tự động nhận diện Hãng: ${state.acState.protocol}`;
+        state.acState.protocol = "";
+        if (badge) badge.textContent = `✨ Chưa nhận diện Hãng (Hãy bấm remote gốc)`;
     }
     const learnInput = document.getElementById("learn-profile-id");
-    if (learnInput) learnInput.value = prof.profileId;
+    if (learnInput && prof) learnInput.value = prof.profileId;
     renderAcStateUI();
 }
 
@@ -445,6 +462,33 @@ document.getElementById("btn-add-profile").addEventListener("click", async () =>
         triggerAutoLearnForProfile(res.profile.profileId);
     } else {
         showToast("Không thể tạo điều hòa mới", true);
+    }
+});
+
+// DELETE PROFILE
+document.getElementById("btn-delete-profile").addEventListener("click", async () => {
+    if (!state.activeProfileId) {
+        showToast("Chưa chọn điều hòa nào để xóa!", true);
+        return;
+    }
+
+    const currentProf = state.profiles.find(p => p.profileId === state.activeProfileId);
+    const profName = currentProf ? (currentProf.name || currentProf.profileId) : state.activeProfileId;
+
+    if (!confirm(`Bạn có chắc chắn muốn xóa "${profName}" không?`)) {
+        return;
+    }
+
+    const res = await apiFetch(`/api/v1/web/profiles/${state.activeProfileId}`, {
+        method: "DELETE"
+    });
+
+    if (res && res.success) {
+        showToast(`Đã xóa "${profName}" thành công!`);
+        state.activeProfileId = null;
+        await loadProfiles();
+    } else {
+        showToast(res?.error || "Không thể xóa điều hòa này", true);
     }
 });
 

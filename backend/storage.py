@@ -313,7 +313,7 @@ class Storage:
                 "deviceId":    device_id,
                 "createdAt":   time.time(),
                 "updatedAt":   time.time(),
-                "protocol":    "ELECTRA_AC",
+                "protocol":    "",
                 "controlType": "NATIVE",
                 "signals":     []
             }
@@ -339,8 +339,8 @@ class Storage:
                     "deviceId":    device_id,
                     "createdAt":   time.time(),
                     "updatedAt":   time.time(),
-                    "protocol":    signal_data.get("protocol"),
-                    "controlType": signal_data.get("controlType"),
+                    "protocol":    signal_data.get("protocol") or "",
+                    "controlType": signal_data.get("controlType") or "NATIVE",
                     "signals":     []
                 }
 
@@ -355,6 +355,9 @@ class Storage:
                     prof["name"] = f"Điều Hòa {protocol}"
                 elif prof["name"].startswith("Điều Hòa #") and "(" not in prof["name"]:
                     prof["name"] = f"{prof['name']} ({protocol})"
+                elif "(" in prof["name"]:
+                    base_name = prof["name"].split("(")[0].strip()
+                    prof["name"] = f"{base_name} ({protocol})"
             else:
                 if not prof.get("controlType"):
                     prof["controlType"] = "RAW"
