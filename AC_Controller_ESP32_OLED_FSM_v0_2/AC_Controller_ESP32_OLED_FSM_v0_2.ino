@@ -1441,11 +1441,12 @@ bool sendRawSignal(JsonObject command, String &errorMessage) {
     if (protocol == decode_type_t::NEC && (addressVal > 0 || commandVal > 0)) {
       transmitCode = irSender.encodeNEC(addressVal, commandVal);
     }
+    const uint16_t effectiveRepeat = (repeatCount > 0) ? repeatCount : 1;
     if (transmitCode > 0) {
-      sentSuccess = irSender.send(protocol, transmitCode, bits, repeatCount);
+      sentSuccess = irSender.send(protocol, transmitCode, bits, effectiveRepeat);
       if (sentSuccess) {
         Serial.printf("[IR TRANSMIT] Sent via Protocol=%s, Code=0x%llX (Addr=0x%X, Cmd=0x%X), Bits=%d, Repeat=%d\n",
-                      protocolStr.c_str(), transmitCode, addressVal, commandVal, bits, repeatCount);
+                      protocolStr.c_str(), transmitCode, addressVal, commandVal, bits, effectiveRepeat);
       }
     }
   }
