@@ -1145,6 +1145,9 @@ bool uploadLearnedSignal(const decode_results &results) {
   doc["protocolId"] = static_cast<int>(results.decode_type);
   doc["bits"] = results.bits;
   doc["code"] = resultToHexidecimal(&results);
+  doc["address"] = results.address;
+  doc["commandCode"] = results.command;
+  doc["repeatCount"] = results.repeat ? 1 : 0;
   doc["stateHex"] = stateBytesToHex(results);
   doc["description"] = IRAcUtils::resultAcToString(&results);
   doc["nativeSendSupported"] = nativeSendSupported;
@@ -1216,51 +1219,67 @@ bool uploadLearnedSignal(const decode_results &results) {
 }
 
 void processIrReceiver() {
-  // Nếu không ở chế độ học, bỏ qua thu IR để tránh mắt đọc thu rác
-  if (!learning.active) {
-    return;
-  }
-
   if (!irReceiver.decode(&irResults)) {
     return;
   }
 
-  // Lọc tín hiệu nhiễu: Lệnh IR điều hòa thực tế luôn có tối thiểu 15-20 timings (rawlen >= 15).
-  // Nhiễu môi trường/ánh sáng/điện áp thường chỉ có rawlen rất ngắn (2 - 10) hoặc bị overflow.
+  // Lọc tín hiệu nhiễu: Lệnh IR điều hòa/thiết bị thực tế luôn có tối thiểu 15 timings.
   if (irResults.rawlen < 15 || irResults.overflow) {
-    Serial.printf("[IR NOISE IGNORED] rawlen=%d, overflow=%d, protocol=%s\n",
-                  irResults.rawlen, irResults.overflow, typeToString(irResults.decode_type).c_str());
     irReceiver.resume();
     return;
   }
 
-  Serial.println();
-  Serial.println("Da nhan tin hieu remote goc.");
-  Serial.print("Protocol: ");
-  Serial.println(typeToString(irResults.decode_type));
-  Serial.print("Bits: ");
-  Serial.println(irResults.bits);
-  Serial.println(resultToHumanReadableBasic(&irResults));
+  // Chế độ 1: Đang trong phiên học lệnh từ Web
+  if (learning.active) {
+    Serial.println();
+    Serial.println("Da nhan tin hieu remote goc (Learning Mode).");
+    Serial.print("Protocol: ");
+    Serial.println(typeToString(irResults.decode_type));
+    Serial.print("Bits: ");
+    Serial.println(irResults.bits);
+    Serial.println(resultToHumanReadableBasic(&irResults));
 
-  const bool uploaded = uploadLearnedSignal(irResults);
+    const bool uploaded = uploadLearnedSignal(irResults);
 
-  if (uploaded) {
-    irReceiver.disableIRIn();
-    const String completedCommandId = learning.commandId;
-    const String learnedProtocol = typeToString(irResults.decode_type);
-    const uint16_t learnedBits = irResults.bits;
-    learning = LearningSession();
-    showLearningSuccess(learnedProtocol, learnedBits);
-    acknowledgeCommand(
-      completedCommandId,
-      "completed",
-      "IR signal learned and uploaded"
-    );
-  } else {
-    // Giữ learning active để người dùng có thể bấm lại.
-    Serial.println("Upload loi. Van tiep tuc cho remote trong thoi gian con lai.");
-    irReceiver.resume();
+    if (uploaded) {
+      const String completedCommandId = learning.commandId;
+      const String learnedProtocol = typeToString(irResults.decode_type);
+      const uint16_t learnedBits = irResults.bits;
+      learning = LearningSession();
+      showLearningSuccess(learnedProtocol, learnedBits);
+      acknowledgeCommand(
+        completedCommandId,
+        "completed",
+        "IR signal learned and uploaded"
+      );
+    } else {
+      Serial.println("Upload loi. Van tiep tuc cho remote trong thoi gian con lai.");
+      irReceiver.resume();
+    }
+    return;
   }
+
+  // Chế độ 2: Lắng nghe thụ động (Passive IR Sniffing) khi remote nhựa bên ngoài bấm
+  Serial.println("[IR SNIFFED] Remote ngoai bam:");
+  Serial.printf("  Protocol: %s | Code: 0x%s | Addr: 0x%X | Cmd: 0x%X | Bits: %d\n",
+                typeToString(irResults.decode_type).c_str(),
+                resultToHexidecimal(&irResults).c_str(),
+                irResults.address, irResults.command, irResults.bits);
+
+  DynamicJsonDocument doc(512);
+  doc["event"] = "IR_SNIFFED";
+  doc["protocol"] = typeToString(irResults.decode_type);
+  doc["code"] = resultToHexidecimal(&irResults);
+  doc["address"] = irResults.address;
+  doc["commandCode"] = irResults.command;
+  doc["bits"] = irResults.bits;
+  doc["repeatCount"] = irResults.repeat ? 1 : 0;
+
+  String payload;
+  serializeJson(doc, payload);
+  httpPostJson("/devices/" + deviceId + "/events", payload, true);
+
+  irReceiver.resume();
 }
 
 void processLearningTimeout() {
@@ -1397,6 +1416,9 @@ bool sendRawSignal(JsonObject command, String &errorMessage) {
   const String protocolStr = command["protocol"] | "";
   const String codeStr = command["code"] | "";
   const uint16_t bits = command["bits"] | 0;
+  const uint16_t repeatCount = command["repeatCount"] | 0;
+  const uint32_t addressVal = command["address"] | 0;
+  const uint32_t commandVal = command["commandCode"] | 0;
 
   decode_type_t protocol = strToDecodeType(protocolStr.c_str());
   uint64_t codeVal = 0;
@@ -1415,10 +1437,17 @@ bool sendRawSignal(JsonObject command, String &errorMessage) {
   }
 
   bool sentSuccess = false;
-  if (protocol != decode_type_t::UNKNOWN && codeVal > 0 && bits > 0) {
-    sentSuccess = irSender.send(protocol, codeVal, bits);
-    if (sentSuccess) {
-      Serial.printf("[IR TRANSMIT] Sent via Protocol=%s, Code=0x%llX, Bits=%d\n", protocolStr.c_str(), codeVal, bits);
+  if (protocol != decode_type_t::UNKNOWN && bits > 0) {
+    uint64_t transmitCode = codeVal;
+    if (protocol == decode_type_t::NEC && (addressVal > 0 || commandVal > 0)) {
+      transmitCode = irSender.encodeNEC(addressVal, commandVal);
+    }
+    if (transmitCode > 0) {
+      sentSuccess = irSender.send(protocol, transmitCode, bits, repeatCount);
+      if (sentSuccess) {
+        Serial.printf("[IR TRANSMIT] Sent via Protocol=%s, Code=0x%llX (Addr=0x%X, Cmd=0x%X), Bits=%d, Repeat=%d\n",
+                      protocolStr.c_str(), transmitCode, addressVal, commandVal, bits, repeatCount);
+      }
     }
   }
 
@@ -1643,7 +1672,6 @@ void setup() {
   IRac::initState(&previousAcState);
   irSender.begin();
   irReceiver.enableIRIn();
-  irReceiver.disableIRIn();
   irReceiver.setUnknownThreshold(12);
 
   displayStateEnteredAt = millis();

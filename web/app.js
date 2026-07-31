@@ -707,11 +707,19 @@ async function loadLearnedProfiles() {
     data.profiles.forEach(prof => {
         (prof.signals || []).forEach(sig => {
             const actionName = sig.action || sig.expectedAction;
+            const addrHex = sig.address ? `0x${sig.address.toString(16).toUpperCase()}` : "";
+            const cmdHex = sig.commandCode ? `0x${sig.commandCode.toString(16).toUpperCase()}` : "";
+            const extraDetails = [
+                addrHex ? `Addr: <strong>${addrHex}</strong>` : "",
+                cmdHex ? `Cmd: <strong>${cmdHex}</strong>` : "",
+                sig.repeatCount ? `Repeat: <strong>${sig.repeatCount}</strong>` : ""
+            ].filter(Boolean).join(" | ");
+
             html += `
                 <div class="signal-item">
                     <div class="signal-info">
                         <h4>${actionName}</h4>
-                        <p>Protocol: <strong>${sig.protocol}</strong> | Bits: ${sig.bits || "--"} | Control: <strong>${sig.controlType || "NATIVE"}</strong></p>
+                        <p>Protocol: <strong>${sig.protocol}</strong> | Bits: ${sig.bits || "--"}${extraDetails ? " | " + extraDetails : ""}</p>
                         <p>Code: <code style="color: var(--accent);">${sig.code || sig.stateHex || "RAW Signal"}</code></p>
                     </div>
                     <div class="signal-actions" style="display: flex; gap: 6px; align-items: center;">
@@ -763,6 +771,9 @@ window.sendLearnedSignal = async (profileId, actionName) => {
                 protocol: signalToTransmit.protocol || "",
                 code: signalToTransmit.code || "",
                 bits: signalToTransmit.bits || 0,
+                address: signalToTransmit.address || 0,
+                commandCode: signalToTransmit.commandCode || 0,
+                repeatCount: signalToTransmit.repeatCount || 0,
                 frequencyKhz: 38
             })
         });

@@ -168,6 +168,12 @@ def device_event(device_id):
     if event_type == "IR_LEARNING_TIMEOUT":
         storage.set_learning_timeout(device_id, profile_id)
         print(f"[Device Event] IR_LEARNING_TIMEOUT for profile {profile_id}")
+    elif event_type == "IR_SNIFFED":
+        proto = data.get("protocol")
+        code = data.get("code")
+        addr = data.get("address")
+        cmd_code = data.get("commandCode")
+        print(f"[Device Event] IR_SNIFFED from Device {device_id} | Protocol: {proto} | Code: 0x{code} | Addr: 0x{addr:X} | Cmd: 0x{cmd_code:X}")
     return jsonify({"status": "ok"}), 200
 
 # ============================================================
