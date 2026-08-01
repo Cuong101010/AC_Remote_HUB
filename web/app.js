@@ -705,53 +705,54 @@ async function loadLearnedProfiles() {
         return;
     }
 
+    const profilesWithSignals = data.profiles.filter(p => p.signals && p.signals.length > 0);
+    if (profilesWithSignals.length === 0) {
+        list.innerHTML = `<div class="empty-state">Chưa có dữ liệu lệnh IR nào được học.</div>`;
+        return;
+    }
+
     let html = "";
-    data.profiles.forEach(prof => {
+    profilesWithSignals.forEach(prof => {
         const signals = prof.signals || [];
         const isCollapsed = openFoldersState[prof.profileId] === true;
         const displayName = prof.name || prof.profileId;
         const protoTag = prof.protocol && prof.protocol !== "UNKNOWN" ? `<span class="proto-tag">${prof.protocol}</span>` : "";
 
         let signalsHtml = "";
-        if (signals.length === 0) {
-            signalsHtml = `<div class="empty-folder-item">Chưa có lệnh IR nào được học trong hồ sơ này.</div>`;
-        } else {
-            signals.forEach(sig => {
-                const actionName = sig.action || sig.expectedAction;
-                const addrHex = sig.address ? `0x${sig.address.toString(16).toUpperCase()}` : "";
-                const cmdHex = sig.commandCode ? `0x${sig.commandCode.toString(16).toUpperCase()}` : "";
-                const extraDetails = [
-                    addrHex ? `Addr: <strong>${addrHex}</strong>` : "",
-                    cmdHex ? `Cmd: <strong>${cmdHex}</strong>` : "",
-                    sig.repeatCount ? `Repeat: <strong>${sig.repeatCount}</strong>` : ""
-                ].filter(Boolean).join(" | ");
+        signals.forEach(sig => {
+            const actionName = sig.action || sig.expectedAction;
+            const addrHex = sig.address ? `0x${sig.address.toString(16).toUpperCase()}` : "";
+            const cmdHex = sig.commandCode ? `0x${sig.commandCode.toString(16).toUpperCase()}` : "";
+            const extraDetails = [
+                addrHex ? `Addr: <strong>${addrHex}</strong>` : "",
+                cmdHex ? `Cmd: <strong>${cmdHex}</strong>` : "",
+                sig.repeatCount ? `Repeat: <strong>${sig.repeatCount}</strong>` : ""
+            ].filter(Boolean).join(" | ");
 
-                signalsHtml += `
-                    <div class="signal-item">
-                        <div class="signal-info">
-                            <h4>⚡ ${actionName}</h4>
-                            <p>Protocol: <strong>${sig.protocol}</strong> | Bits: ${sig.bits || "--"}${extraDetails ? " | " + extraDetails : ""}</p>
-                            <p>Code: <code style="color: var(--accent);">${sig.code || sig.stateHex || "RAW Signal"}</code></p>
-                        </div>
-                        <div class="signal-actions" style="display: flex; gap: 6px; align-items: center;">
-                            <button class="btn-secondary" onclick="window.sendLearnedSignal('${prof.profileId}', '${actionName}')">
-                                Phát IR
-                            </button>
-                            <button class="btn-secondary danger" onclick="window.deleteLearnedSignal('${prof.profileId}', '${actionName}')">
-                                🗑️ Xóa
-                            </button>
-                        </div>
+            signalsHtml += `
+                <div class="signal-item">
+                    <div class="signal-info">
+                        <h4>⚡ ${actionName}</h4>
+                        <p>Protocol: <strong>${sig.protocol}</strong> | Bits: ${sig.bits || "--"}${extraDetails ? " | " + extraDetails : ""}</p>
+                        <p>Code: <code style="color: var(--accent);">${sig.code || sig.stateHex || "RAW Signal"}</code></p>
                     </div>
-                `;
-            });
-        }
+                    <div class="signal-actions" style="display: flex; gap: 6px; align-items: center;">
+                        <button class="btn-secondary" onclick="window.sendLearnedSignal('${prof.profileId}', '${actionName}')">
+                            Phát IR
+                        </button>
+                        <button class="btn-secondary danger" onclick="window.deleteLearnedSignal('${prof.profileId}', '${actionName}')">
+                            🗑️ Xóa
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
 
         html += `
             <div class="profile-folder-group ${isCollapsed ? "collapsed" : ""}" id="folder-group-${prof.profileId}">
                 <div class="profile-folder-header" onclick="window.toggleProfileFolder('${prof.profileId}')">
                     <div class="folder-title">
                         <span class="folder-arrow">${isCollapsed ? "▶" : "▼"}</span>
-                        <span class="folder-icon">${isCollapsed ? "📁" : "📂"}</span>
                         <span class="folder-name">${displayName}</span>
                         <span class="folder-id-badge">ID: ${prof.profileId}</span>
                         ${protoTag}
@@ -776,9 +777,7 @@ window.toggleProfileFolder = (profileId) => {
     openFoldersState[profileId] = isNowCollapsed;
 
     const arrow = group.querySelector(".folder-arrow");
-    const icon = group.querySelector(".folder-icon");
     if (arrow) arrow.textContent = isNowCollapsed ? "▶" : "▼";
-    if (icon) icon.textContent = isNowCollapsed ? "📁" : "📂";
 };
 
 window.sendLearnedSignal = async (profileId, actionName) => {
