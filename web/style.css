@@ -817,13 +817,110 @@ body {
 .signals-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+}
+
+/* VSCode-style Tree View Folders */
+.profile-folder-group {
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.profile-folder-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: rgba(30, 41, 59, 0.7);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
+}
+
+.profile-folder-header:hover {
+    background: rgba(51, 65, 85, 0.8);
+}
+
+.folder-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    flex-wrap: wrap;
+}
+
+.folder-arrow {
+    font-size: 10px;
+    color: var(--accent);
+    width: 12px;
+    display: inline-block;
+    transition: transform 0.15s ease;
+}
+
+.folder-icon {
+    font-size: 14px;
+}
+
+.folder-name {
+    color: var(--text-primary);
+}
+
+.folder-id-badge {
+    font-size: 11px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: var(--accent);
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.proto-tag {
+    font-size: 11px;
+    color: var(--success);
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.folder-count-badge {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.profile-folder-content {
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid var(--border);
+    background: rgba(10, 15, 30, 0.3);
+}
+
+.profile-folder-group.collapsed .profile-folder-content {
+    display: none;
+}
+
+.empty-folder-item {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 6px 4px;
 }
 
 .signal-item {
-    background: rgba(15,23,42,0.5);
+    background: rgba(15,23,42,0.6);
     border: 1px solid var(--border);
-    padding: 12px;
+    padding: 10px 12px;
     border-radius: var(--radius-sm);
     display: flex;
     justify-content: space-between;
@@ -831,7 +928,7 @@ body {
     gap: 10px;
 }
 
-.signal-info h4 { font-size: 14px; font-weight: 600; }
+.signal-info h4 { font-size: 13px; font-weight: 600; }
 .signal-info p  { font-size: 12px; color: var(--text-muted); }
 
 /* DEVICE LIST */

@@ -384,12 +384,12 @@ function renderProfilesList() {
     select.innerHTML = state.profiles.map(p => {
         const name = p.name || p.profileId;
         let displayName;
-        if (name.includes("(")) {
+        if (name.includes("[")) {
             displayName = name;
         } else if (p.protocol && p.protocol !== "UNKNOWN") {
-            displayName = `${name} (${p.protocol})`;
+            displayName = `${name} (${p.protocol}) [ID: ${p.profileId}]`;
         } else {
-            displayName = `${name} (Chưa nhận diện)`;
+            displayName = `${name} (Chưa nhận diện) [ID: ${p.profileId}]`;
         }
         return `
         <option value="${p.profileId}" ${p.profileId === state.activeProfileId ? "selected" : ""}>
@@ -692,6 +692,8 @@ async function pollLearningStatus(profileId, commandId) {
     }, 1500);
 }
 
+let openFoldersState = {};
+
 async function loadLearnedProfiles() {
     if (!state.activeDeviceId) return;
     const data = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/profiles`);
@@ -705,37 +707,79 @@ async function loadLearnedProfiles() {
 
     let html = "";
     data.profiles.forEach(prof => {
-        (prof.signals || []).forEach(sig => {
-            const actionName = sig.action || sig.expectedAction;
-            const addrHex = sig.address ? `0x${sig.address.toString(16).toUpperCase()}` : "";
-            const cmdHex = sig.commandCode ? `0x${sig.commandCode.toString(16).toUpperCase()}` : "";
-            const extraDetails = [
-                addrHex ? `Addr: <strong>${addrHex}</strong>` : "",
-                cmdHex ? `Cmd: <strong>${cmdHex}</strong>` : "",
-                sig.repeatCount ? `Repeat: <strong>${sig.repeatCount}</strong>` : ""
-            ].filter(Boolean).join(" | ");
+        const signals = prof.signals || [];
+        const isCollapsed = openFoldersState[prof.profileId] === true;
+        const displayName = prof.name || prof.profileId;
+        const protoTag = prof.protocol && prof.protocol !== "UNKNOWN" ? `<span class="proto-tag">${prof.protocol}</span>` : "";
 
-            html += `
-                <div class="signal-item">
-                    <div class="signal-info">
-                        <h4>${actionName}</h4>
-                        <p>Protocol: <strong>${sig.protocol}</strong> | Bits: ${sig.bits || "--"}${extraDetails ? " | " + extraDetails : ""}</p>
-                        <p>Code: <code style="color: var(--accent);">${sig.code || sig.stateHex || "RAW Signal"}</code></p>
+        let signalsHtml = "";
+        if (signals.length === 0) {
+            signalsHtml = `<div class="empty-folder-item">Chưa có lệnh IR nào được học trong hồ sơ này.</div>`;
+        } else {
+            signals.forEach(sig => {
+                const actionName = sig.action || sig.expectedAction;
+                const addrHex = sig.address ? `0x${sig.address.toString(16).toUpperCase()}` : "";
+                const cmdHex = sig.commandCode ? `0x${sig.commandCode.toString(16).toUpperCase()}` : "";
+                const extraDetails = [
+                    addrHex ? `Addr: <strong>${addrHex}</strong>` : "",
+                    cmdHex ? `Cmd: <strong>${cmdHex}</strong>` : "",
+                    sig.repeatCount ? `Repeat: <strong>${sig.repeatCount}</strong>` : ""
+                ].filter(Boolean).join(" | ");
+
+                signalsHtml += `
+                    <div class="signal-item">
+                        <div class="signal-info">
+                            <h4>⚡ ${actionName}</h4>
+                            <p>Protocol: <strong>${sig.protocol}</strong> | Bits: ${sig.bits || "--"}${extraDetails ? " | " + extraDetails : ""}</p>
+                            <p>Code: <code style="color: var(--accent);">${sig.code || sig.stateHex || "RAW Signal"}</code></p>
+                        </div>
+                        <div class="signal-actions" style="display: flex; gap: 6px; align-items: center;">
+                            <button class="btn-secondary" onclick="window.sendLearnedSignal('${prof.profileId}', '${actionName}')">
+                                Phát IR
+                            </button>
+                            <button class="btn-secondary danger" onclick="window.deleteLearnedSignal('${prof.profileId}', '${actionName}')">
+                                🗑️ Xóa
+                            </button>
+                        </div>
                     </div>
-                    <div class="signal-actions" style="display: flex; gap: 6px; align-items: center;">
-                        <button class="btn-secondary" onclick="window.sendLearnedSignal('${prof.profileId}', '${actionName}')">
-                            Phát IR
-                        </button>
-                        <button class="btn-secondary danger" onclick="window.deleteLearnedSignal('${prof.profileId}', '${actionName}')">
-                            🗑️ Xóa
-                        </button>
+                `;
+            });
+        }
+
+        html += `
+            <div class="profile-folder-group ${isCollapsed ? "collapsed" : ""}" id="folder-group-${prof.profileId}">
+                <div class="profile-folder-header" onclick="window.toggleProfileFolder('${prof.profileId}')">
+                    <div class="folder-title">
+                        <span class="folder-arrow">${isCollapsed ? "▶" : "▼"}</span>
+                        <span class="folder-icon">${isCollapsed ? "📁" : "📂"}</span>
+                        <span class="folder-name">${displayName}</span>
+                        <span class="folder-id-badge">ID: ${prof.profileId}</span>
+                        ${protoTag}
                     </div>
+                    <span class="folder-count-badge">${signals.length} lệnh</span>
                 </div>
-            `;
-        });
+                <div class="profile-folder-content">
+                    ${signalsHtml}
+                </div>
+            </div>
+        `;
     });
+
     list.innerHTML = html || `<div class="empty-state">Chưa có lệnh IR nào được học.</div>`;
 }
+
+window.toggleProfileFolder = (profileId) => {
+    const group = document.getElementById(`folder-group-${profileId}`);
+    if (!group) return;
+    const isNowCollapsed = !group.classList.contains("collapsed");
+    group.classList.toggle("collapsed", isNowCollapsed);
+    openFoldersState[profileId] = isNowCollapsed;
+
+    const arrow = group.querySelector(".folder-arrow");
+    const icon = group.querySelector(".folder-icon");
+    if (arrow) arrow.textContent = isNowCollapsed ? "▶" : "▼";
+    if (icon) icon.textContent = isNowCollapsed ? "📁" : "📂";
+};
 
 window.sendLearnedSignal = async (profileId, actionName) => {
     if (!state.activeDeviceId) {
