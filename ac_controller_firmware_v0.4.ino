@@ -545,7 +545,7 @@ void parseMqttCommand(const char* payload, unsigned int length) {
     return;
   }
 
-  JsonVariantConst cmdObj = doc["command"].isNull() ? doc.as<JsonVariantConst>() : doc["command"];
+  JsonVariantConst cmdObj = doc["command"].isNull() ? doc.as<JsonVariantConst>() : doc["command"].as<JsonVariantConst>();
   String typeStr = cmdObj["type"] | "";
   String commandId = cmdObj["id"] | "";
 
