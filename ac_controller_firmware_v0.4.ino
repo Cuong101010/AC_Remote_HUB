@@ -553,6 +553,7 @@ void pollNextCommandHttp() {
   String url = String(API_BASE_URL) + "/devices/" + deviceId + "/commands/next";
   http.begin(secureNetClient, url);
   http.addHeader("X-Device-Token", deviceToken);
+  http.addHeader("Authorization", String("Bearer ") + deviceToken);
   http.setTimeout(1500);
 
   int code = http.GET();
@@ -583,6 +584,7 @@ void sendHeartbeatHttp() {
   http.begin(secureNetClient, url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Token", deviceToken);
+  http.addHeader("Authorization", String("Bearer ") + deviceToken);
   http.setTimeout(2500);
 
   DynamicJsonDocument doc(256);

@@ -82,8 +82,10 @@ def require_user():
     return user, None, None
 
 def authenticate_device(device_id):
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.replace("Bearer ", "").strip()
+    token = request.headers.get("X-Device-Token", "").strip()
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.replace("Bearer ", "").strip()
     if not token or not storage.verify_token(device_id, token):
         return False
     return True
