@@ -499,11 +499,10 @@ void ensureDeviceRegistered() {
   lastRegisterAttemptAt = now;
 
   HTTPClient http;
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
+  secureNetClient.setInsecure();
 
   String url = String(API_BASE_URL) + "/devices/register";
-  http.begin(secureClient, url);
+  http.begin(secureNetClient, url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Bootstrap-Key", DEVICE_BOOTSTRAP_KEY);
 
@@ -549,11 +548,10 @@ void pollNextCommandHttp() {
   lastHttpPollAt = now;
 
   HTTPClient http;
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
+  secureNetClient.setInsecure();
 
   String url = String(API_BASE_URL) + "/devices/" + deviceId + "/commands/next";
-  http.begin(secureClient, url);
+  http.begin(secureNetClient, url);
   http.addHeader("X-Device-Token", deviceToken);
   http.setTimeout(1500);
 
@@ -579,11 +577,10 @@ void sendHeartbeatHttp() {
   lastHeartbeatAt = now;
 
   HTTPClient http;
-  WiFiClientSecure secureClient;
-  secureClient.setInsecure();
+  secureNetClient.setInsecure();
 
   String url = String(API_BASE_URL) + "/devices/" + deviceId + "/heartbeat";
-  http.begin(secureClient, url);
+  http.begin(secureNetClient, url);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("X-Device-Token", deviceToken);
   http.setTimeout(2500);
