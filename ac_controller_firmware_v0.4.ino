@@ -1008,17 +1008,28 @@ void setup() {
             if (xCloudQueue != NULL && uxQueueMessagesWaiting(xCloudQueue) > 0) {
               CloudMsg cloudMsg;
               if (xQueueReceive(xCloudQueue, &cloudMsg, 0) == pdTRUE) {
-                if (cloudMsg.type == CLOUD_ACK_COMMAND && mqttClient.connected()) {
-                  String ackTopic = String("acremote/devices/") + deviceId + "/ack";
+                if (cloudMsg.type == CLOUD_ACK_COMMAND) {
                   DynamicJsonDocument ackDoc(256);
-                  ackDoc["commandId"] = cloudMsg.commandId;
                   ackDoc["status"] = cloudMsg.status;
                   ackDoc["message"] = cloudMsg.message;
                   String ackPayload;
                   serializeJson(ackDoc, ackPayload);
 
-                  mqttClient.publish(ackTopic.c_str(), ackPayload.c_str());
-                  Serial.printf("[MQTT ACK Sent] Cmd ID: %s | Status: %s\n", cloudMsg.commandId, cloudMsg.status);
+                  HTTPClient httpAck;
+                  secureNetClient.setInsecure();
+                  String ackUrl = String(API_BASE_URL) + "/devices/" + deviceId + "/commands/" + cloudMsg.commandId + "/ack";
+                  httpAck.begin(secureNetClient, ackUrl);
+                  httpAck.addHeader("Content-Type", "application/json");
+                  httpAck.addHeader("X-Device-Token", deviceToken);
+                  httpAck.addHeader("Authorization", String("Bearer ") + deviceToken);
+                  httpAck.POST(ackPayload);
+                  httpAck.end();
+
+                  if (mqttClient.connected()) {
+                    String ackTopic = String("acremote/devices/") + deviceId + "/ack";
+                    mqttClient.publish(ackTopic.c_str(), ackPayload.c_str());
+                  }
+                  Serial.printf("[ACK Sent] Cmd ID: %s | Status: %s\n", cloudMsg.commandId, cloudMsg.status);
                 }
               }
             }

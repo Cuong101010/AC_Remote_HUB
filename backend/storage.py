@@ -278,6 +278,8 @@ class Storage:
                         found_after = True
                     continue
                 if cmd.get("status") == "pending":
+                    cmd["status"] = "sent"
+                    self._save_json(self.commands_file, self.commands)
                     return dict(cmd)
             return None
 
