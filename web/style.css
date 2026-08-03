@@ -1017,13 +1017,13 @@ body {
 }
 
 /* =====================================================
-   TEMPERATURE WIDGET (DHT11) — góc dưới phải
+   TEMPERATURE WIDGET (DHT11) — góc trên trái
    ===================================================== */
 
 .temp-widget {
     position: fixed;
-    bottom: 20px;
-    right: 20px;
+    top: 20px;
+    left: 20px;
     z-index: 999;
 
     display: flex;
@@ -1040,7 +1040,7 @@ body {
 
     cursor: default;
     user-select: none;
-    animation: slideInRight 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    animation: slideInLeft 0.4s cubic-bezier(0.22, 1, 0.36, 1);
     transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
@@ -1088,7 +1088,7 @@ body {
     margin-left: 1px;
 }
 
-@keyframes slideInRight {
-    from { opacity: 0; transform: translateX(20px); }
+@keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-20px); }
     to   { opacity: 1; transform: translateX(0); }
 }
