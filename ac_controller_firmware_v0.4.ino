@@ -533,6 +533,39 @@ void ensureDeviceRegistered() {
   http.end();
 }
 
+static unsigned long lastHttpPollAt = 0;
+static const unsigned long HTTP_POLL_FALLBACK_INTERVAL_MS = 2000;
+
+void pollNextCommandHttp() {
+  if (WiFi.status() != WL_CONNECTED || deviceToken.isEmpty()) {
+    return;
+  }
+  const unsigned long now = millis();
+  if (now - lastHttpPollAt < HTTP_POLL_FALLBACK_INTERVAL_MS) {
+    return;
+  }
+  lastHttpPollAt = now;
+
+  HTTPClient http;
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+
+  String url = String(API_BASE_URL) + "/devices/" + deviceId + "/commands/next";
+  http.begin(secureClient, url);
+  http.addHeader("X-Device-Token", deviceToken);
+  http.setTimeout(1500);
+
+  int code = http.GET();
+  if (code == 200) {
+    String payload = http.getString();
+    if (!payload.isEmpty() && payload != "{}") {
+      Serial.printf("[HTTP Fallback Received] Payload: %s\n", payload.c_str());
+      parseMqttCommand(payload.c_str(), payload.length());
+    }
+  }
+  http.end();
+}
+
 // ============================================================
 // MQTT CALLBACK & RECONNECT LOGIC (NHẬN LỆNH TỨC THÌ <50ms)
 // ============================================================
@@ -909,12 +942,15 @@ void setup() {
           ensureDeviceRegistered();
 
           if (!deviceToken.isEmpty()) {
-            // Duy trì kết nối MQTT vĩnh viễn
+            // 1. Duy trì kết nối MQTT (Ưu tiên số 1: Tức thì <50ms)
             if (!mqttClient.connected()) {
               reconnectMqtt();
             } else {
               mqttClient.loop(); // Lắng nghe tin nhắn đẩy tức thì
             }
+
+            // 2. HTTP Fallback (Ưu tiên số 2: Dự phòng kéo lệnh nếu MQTT Cloud bị chặn)
+            pollNextCommandHttp();
 
             // Xử lý Cloud Queue (Gửi ACK phản hồi)
             if (xCloudQueue != NULL && uxQueueMessagesWaiting(xCloudQueue) > 0) {
