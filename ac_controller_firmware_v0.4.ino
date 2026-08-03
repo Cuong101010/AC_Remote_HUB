@@ -650,7 +650,8 @@ void parseMqttCommand(const char* payload, unsigned int length) {
     snprintf(cmd.fan, sizeof(cmd.fan), "%s", cmdObj["fan"] | "auto");
     snprintf(cmd.swingV, sizeof(cmd.swingV), "%s", cmdObj["swingV"] | "off");
 
-    showCommandEvent(cmd.power, (int)cmd.temperature, String(cmd.mode), "SET_AC_STATE");
+    snprintf(cmd.fan, sizeof(cmd.fan), "%s", cmdObj["fan"] | "auto");
+    snprintf(cmd.swingV, sizeof(cmd.swingV), "%s", cmdObj["swingV"] | "off");
   }
   else if (typeStr == "SEND_RAW") {
     cmd.type = CMD_SEND_RAW;
@@ -665,7 +666,6 @@ void parseMqttCommand(const char* payload, unsigned int length) {
       }
       cmd.rawCount = idx;
     }
-    showCommandEvent(true, 26, "RAW", "SEND_RAW");
   }
   else if (typeStr == "START_LEARNING") {
     cmd.type = CMD_START_LEARNING;
@@ -678,13 +678,10 @@ void parseMqttCommand(const char* payload, unsigned int length) {
     learning.expectedAction = cmd.expectedAction;
     learning.startedAt = millis();
     learning.timeoutMs = cmd.timeoutSeconds * 1000UL;
-
-    showLearningEvent();
   }
   else if (typeStr == "CANCEL_LEARNING") {
     cmd.type = CMD_CANCEL_LEARNING;
     learning.active = false;
-    goToBaseDisplayState();
   }
 
   // Nạp lệnh vào FreeRTOS Queue để Core 1 thực thi IR ngay lập tức
@@ -839,6 +836,7 @@ void controlTaskLoop(void *pvParameters) {
       String errStr = "";
 
       if (cmd.type == CMD_SET_AC_STATE) {
+        showCommandEvent(cmd.power, (int)cmd.temperature, String(cmd.mode), "SET_AC_STATE");
         if (strlen(cmd.codeStr) > 0) {
           success = sendEncodedSignal(cmd, errStr);
         } else {
@@ -847,6 +845,7 @@ void controlTaskLoop(void *pvParameters) {
         updateCommandEventResult(success);
       }
       else if (cmd.type == CMD_SEND_RAW) {
+        showCommandEvent(true, 26, "RAW", "SEND_RAW");
         if (cmd.rawCount > 0) {
           silenceReceiverForTx();
           irSender.sendRaw(cmd.rawUs, cmd.rawCount, cmd.frequencyKhz);
@@ -856,6 +855,14 @@ void controlTaskLoop(void *pvParameters) {
           errStr = "rawUs is empty";
         }
         updateCommandEventResult(success);
+      }
+      else if (cmd.type == CMD_START_LEARNING) {
+        showLearningEvent();
+        success = true;
+      }
+      else if (cmd.type == CMD_CANCEL_LEARNING) {
+        goToBaseDisplayState();
+        success = true;
       }
 
       // Gửi ACK phản hồi về Core 0 để đẩy lên MQTT Broker
