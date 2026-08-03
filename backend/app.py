@@ -156,6 +156,7 @@ def device_heartbeat(device_id):
 def get_next_command(device_id):
     if not authenticate_device(device_id):
         return jsonify({"error": "Unauthorized"}), 401
+    storage.update_heartbeat(device_id, {})
     after_id = request.args.get("after")
     cmd = storage.get_next_pending_command(device_id, after_id)
     if not cmd:
