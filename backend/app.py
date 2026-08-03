@@ -26,8 +26,9 @@ MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
 MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER", "")
 MQTT_BROKER_PASS = os.getenv("MQTT_BROKER_PASS", "")
 
-def publish_mqtt_command(device_id, cmd):
-    """Đẩy lệnh tức thì xuống ESP32 qua MQTT Broker (<50ms)."""
+import threading
+
+def _mqtt_publish_worker(device_id, cmd):
     if not has_mqtt:
         return
     try:
@@ -37,9 +38,14 @@ def publish_mqtt_command(device_id, cmd):
         if MQTT_BROKER_USER:
             auth = {"username": MQTT_BROKER_USER, "password": MQTT_BROKER_PASS}
         publish.single(topic, payload, hostname=MQTT_BROKER_HOST, port=MQTT_BROKER_PORT, auth=auth, qos=1)
-        print(f"[MQTT Instant Push] Published to topic '{topic}' (<50ms)")
+        print(f"[MQTT Instant Push] Published to topic '{topic}'")
     except Exception as e:
         print(f"[MQTT Push Warning] {e}")
+
+def publish_mqtt_command(device_id, cmd):
+    """Đẩy lệnh không chặn (Non-blocking background thread) để Web không bao giờ bị treo."""
+    t = threading.Thread(target=_mqtt_publish_worker, args=(device_id, cmd), daemon=True)
+    t.start()
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 
