@@ -716,12 +716,14 @@ void reconnectMqtt() {
 
   Serial.printf("[MQTT] Connecting to Broker %s:%d (ClientID: %s)...\n", MQTT_BROKER_HOST, MQTT_BROKER_PORT, clientId.c_str());
 
+  vTaskDelay(pdMS_TO_TICKS(10));
   bool connected = false;
   if (strlen(MQTT_BROKER_USER) > 0) {
     connected = mqttClient.connect(clientId.c_str(), MQTT_BROKER_USER, MQTT_BROKER_PASS);
   } else {
     connected = mqttClient.connect(clientId.c_str());
   }
+  vTaskDelay(pdMS_TO_TICKS(10));
 
   if (connected) {
     Serial.println("[MQTT Connected Success!] Subscribing to command push topic...");
@@ -961,6 +963,8 @@ void setup() {
   mqttClient.setClient(netClient);
   mqttClient.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
   mqttClient.setCallback(mqttCallback);
+  mqttClient.setSocketTimeout(2);
+  mqttClient.setKeepAlive(15);
 
   setDisplayState(DisplayState::STATE_BOOT);
 
