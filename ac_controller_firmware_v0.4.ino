@@ -564,6 +564,53 @@ void pollNextCommandHttp() {
       Serial.printf("[HTTP Fallback Received] Payload: %s\n", payload.c_str());
       parseMqttCommand(payload.c_str(), payload.length());
     }
+  } else if (code == 401) {
+    Serial.println("[HTTP Fallback Warning] Token 401 Unauthorized. Re-registering token...");
+    deviceToken = "";
+    preferences.remove("dev_token");
+  }
+  http.end();
+}
+
+static unsigned long lastHeartbeatAt = 0;
+static const unsigned long HEARTBEAT_INTERVAL_MS = 15000;
+
+void sendHeartbeatHttp() {
+  if (WiFi.status() != WL_CONNECTED || deviceToken.isEmpty()) return;
+  const unsigned long now = millis();
+  if (now - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) return;
+  lastHeartbeatAt = now;
+
+  HTTPClient http;
+  WiFiClientSecure secureClient;
+  secureClient.setInsecure();
+
+  String url = String(API_BASE_URL) + "/devices/" + deviceId + "/heartbeat";
+  http.begin(secureClient, url);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Token", deviceToken);
+  http.setTimeout(2500);
+
+  DynamicJsonDocument doc(256);
+  doc["firmwareVersion"] = FW_VERSION;
+  doc["ip"] = WiFi.localIP().toString();
+  doc["ssid"] = WiFi.SSID();
+  doc["rssi"] = WiFi.RSSI();
+  doc["freeHeap"] = ESP.getFreeHeap();
+  doc["uptimeMs"] = millis();
+
+  String body;
+  serializeJson(doc, body);
+  int code = http.POST(body);
+  if (code == 200) {
+    markCloudSuccess();
+    Serial.println("[Heartbeat] Online status updated successfully.");
+  } else if (code == 401) {
+    Serial.println("[Heartbeat Warning] Token 401 Unauthorized. Resetting token...");
+    deviceToken = "";
+    preferences.remove("dev_token");
+  } else {
+    Serial.printf("[Heartbeat Warning] HTTP Code: %d\n", code);
   }
   http.end();
 }
@@ -953,6 +1000,9 @@ void setup() {
 
             // 2. HTTP Fallback (Ưu tiên số 2: Dự phòng kéo lệnh nếu MQTT Cloud bị chặn)
             pollNextCommandHttp();
+
+            // 3. HTTP Heartbeat (Cập nhật trạng thái Online liên tục cho Server)
+            sendHeartbeatHttp();
 
             // Xử lý Cloud Queue (Gửi ACK phản hồi)
             if (xCloudQueue != NULL && uxQueueMessagesWaiting(xCloudQueue) > 0) {
