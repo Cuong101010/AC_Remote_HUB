@@ -572,9 +572,6 @@ void pollNextCommandHttp() {
   http.end();
 }
 
-static unsigned long lastHeartbeatAt = 0;
-static const unsigned long HEARTBEAT_INTERVAL_MS = 15000;
-
 void sendHeartbeatHttp() {
   if (WiFi.status() != WL_CONNECTED || deviceToken.isEmpty()) return;
   const unsigned long now = millis();
