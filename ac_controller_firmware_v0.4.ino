@@ -533,6 +533,8 @@ void ensureDeviceRegistered() {
   http.end();
 }
 
+void parseMqttCommand(const char* payload, unsigned int length);
+
 static unsigned long lastHttpPollAt = 0;
 static const unsigned long HTTP_POLL_FALLBACK_INTERVAL_MS = 2000;
 
