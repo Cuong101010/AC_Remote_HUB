@@ -295,6 +295,8 @@ function selectDevice(deviceId) {
     }
     renderDevicesList();
     updateRemoteVisibility();
+    // Khởi động polling nhiệt độ DHT11 khi chọn thiết bị
+    if (typeof startTempWidgetPolling === "function") startTempWidgetPolling();
 }
 
 function updateDeviceUI(dev) {
@@ -878,6 +880,50 @@ window.deleteLearnedSignal = async (profileId, actionName) => {
 };
 
 // =====================================================
+//  TEMPERATURE WIDGET (DHT11)
+// =====================================================
+
+let tempWidgetTimer = null;
+
+async function fetchAndShowTemperature() {
+    if (!state.activeDeviceId || !sessionToken) return;
+
+    const data = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/sensor`);
+    const widget = document.getElementById("temp-widget");
+    const valueEl = document.getElementById("temp-widget-value");
+
+    if (!widget || !valueEl) return;
+
+    if (data && data.sensor && data.sensor.temperature !== undefined) {
+        const temp = parseFloat(data.sensor.temperature);
+        if (!isNaN(temp)) {
+            // Hiệu ứng flash khi giá trị thay đổi
+            valueEl.classList.add("updating");
+            setTimeout(() => valueEl.classList.remove("updating"), 400);
+            valueEl.textContent = temp.toFixed(1);
+            widget.classList.remove("hidden");
+        }
+    }
+    // Nếu chưa có data, widget vẫn ẩn cho đến khi nhận được giá trị đầu tiên
+}
+
+function startTempWidgetPolling() {
+    stopTempWidgetPolling();
+    fetchAndShowTemperature(); // poll ngay lần đầu
+    tempWidgetTimer = setInterval(fetchAndShowTemperature, 5000);
+}
+
+function stopTempWidgetPolling() {
+    if (tempWidgetTimer) {
+        clearInterval(tempWidgetTimer);
+        tempWidgetTimer = null;
+    }
+    // Ẩn widget khi không còn thiết bị
+    const widget = document.getElementById("temp-widget");
+    if (widget) widget.classList.add("hidden");
+}
+
+// =====================================================
 //  INIT
 // =====================================================
 
@@ -889,6 +935,13 @@ function initApp() {
     if (autoRefreshTimer) clearInterval(autoRefreshTimer);
     autoRefreshTimer = setInterval(loadDevices, 5000);
 }
+
+// Khi chọn thiết bị → khởi động lại polling nhiệt độ
+const _origSelectDevice = window.selectDeviceApp;
+window.selectDeviceApp = (id) => {
+    selectDevice(id);
+    startTempWidgetPolling();
+};
 
 // Entry point — check saved session
 (async function boot() {

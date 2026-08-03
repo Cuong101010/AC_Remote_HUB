@@ -158,6 +158,12 @@ def device_heartbeat(device_id):
         return jsonify({"error": "Unauthorized"}), 401
     data = request.get_json(silent=True) or {}
     storage.update_heartbeat(device_id, data)
+    # Lưu luôn temperature/humidity nếu heartbeat kèm theo
+    if "temperature" in data or "humidity" in data:
+        storage.update_sensor_data(device_id, {
+            "temperature": data.get("temperature"),
+            "humidity":    data.get("humidity")
+        })
     return jsonify({"status": "ok", "serverTime": time.time()}), 200
 
 @app.route("/api/v1/devices/<device_id>/commands/next", methods=["GET"])
@@ -213,6 +219,15 @@ def device_event(device_id):
         print(f"[Device Event] IR_SNIFFED from Device {device_id} | Protocol: {proto} | Code: 0x{code} | Addr: 0x{addr:X} | Cmd: 0x{cmd_code:X}")
     return jsonify({"status": "ok"}), 200
 
+@app.route("/api/v1/devices/<device_id>/sensor", methods=["POST"])
+def device_sensor(device_id):
+    """Nhận dữ liệu nhiệt độ/độ ẩm từ firmware ESP32."""
+    if not authenticate_device(device_id):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    storage.update_sensor_data(device_id, data)
+    return jsonify({"status": "ok"}), 200
+
 # ============================================================
 # WEB UI API — yêu cầu user session
 # ============================================================
@@ -225,6 +240,15 @@ def web_list_devices():
     user_device_ids = storage.get_user_device_ids(user)
     devices = storage.list_devices(user_device_ids=user_device_ids)
     return jsonify({"devices": devices})
+
+@app.route("/api/v1/web/devices/<device_id>/sensor", methods=["GET"])
+def web_get_sensor(device_id):
+    """Trả về dữ liệu cảm biến mới nhất của thiết bị để web hiển thị."""
+    user, err_resp, err_code = require_user()
+    if err_resp:
+        return err_resp, err_code
+    data = storage.get_sensor_data(device_id)
+    return jsonify({"sensor": data})
 
 @app.route("/api/v1/web/pair", methods=["POST"])
 def web_pair_device():

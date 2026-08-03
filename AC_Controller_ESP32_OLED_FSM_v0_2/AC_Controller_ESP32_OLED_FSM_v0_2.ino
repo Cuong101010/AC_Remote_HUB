@@ -21,6 +21,7 @@
   - ArduinoJson
   - IRremoteESP8266
   - U8g2 by oliver
+  - DHT sensor library by Adafruit (+ Adafruit Unified Sensor)
 
   LƯU Ý:
   - Thay API_BASE_URL và DEVICE_BOOTSTRAP_KEY trước khi dùng.
@@ -37,6 +38,7 @@
 #include <U8g2lib.h>
 #include <ArduinoJson.h>
 #include <new>
+#include <DHT.h>
 
 #include <IRremoteESP8266.h>
 #include <IRrecv.h>
@@ -75,6 +77,10 @@ static const uint8_t OLED_SDA_PIN = 21;
 static const uint8_t OLED_SCL_PIN = 22;
 static const uint8_t OLED_I2C_ADDRESS = 0x3C;
 
+// DHT11 nhiệt độ / độ ẩm
+static const uint8_t  DHT_PIN  = 14;   // GPIO14 — đổi nếu cần
+static const uint8_t  DHT_TYPE = DHT11; // hoặc DHT22
+
 // Remote điều hòa có frame dài.
 static const uint16_t IR_CAPTURE_BUFFER_SIZE = 2048;
 static const uint8_t IR_CAPTURE_TIMEOUT_MS = 80;
@@ -97,12 +103,14 @@ static const unsigned long EVENT_SCREEN_DURATION_MS = 3000;
 static const unsigned long DISPLAY_STATUS_REFRESH_MS = 1000;
 static const unsigned long CLOUD_ONLINE_WINDOW_MS = 15000;
 static const unsigned long WIFI_INITIAL_CONNECT_WINDOW_MS = 10000;
+static const unsigned long DHT_READ_INTERVAL_MS = 5000; // Đọc DHT11 mỗi 5 giây
 
 // ============================================================
 // ĐỐI TƯỢNG TOÀN CỤC
 // ============================================================
 
 Preferences preferences;
+DHT dht(DHT_PIN, DHT_TYPE);
 WiFiManager wifiManager;
 
 // U8x8 text mode: nhe hon full-framebuffer, phu hop firmware IR lon.
@@ -133,6 +141,11 @@ String deviceId;
 String deviceToken;
 String pairingCode;
 String lastCommandId;
+
+// DHT11 sensor state
+float dhtTemperature = NAN;
+float dhtHumidity    = NAN;
+unsigned long lastDhtReadAt = 0;
 
 unsigned long lastCommandPollAt = 0;
 unsigned long lastHeartbeatAt = 0;
@@ -963,6 +976,38 @@ void ensureDeviceRegistered() {
   registerDevice();
 }
 
+// ============================================================
+// DHT11 SENSOR
+// ============================================================
+
+void readDhtSensor() {
+  const float t = dht.readTemperature();
+  const float h = dht.readHumidity();
+
+  if (!isnan(t) && !isnan(h)) {
+    dhtTemperature = t;
+    dhtHumidity    = h;
+    Serial.printf("[DHT11] Nhiet do: %.1f C | Do am: %.1f %%\n", t, h);
+  } else {
+    Serial.println("[DHT11] Doc cam bien that bai (NaN), bo qua.");
+  }
+}
+
+void sendSensorData() {
+  if (deviceToken.isEmpty() || WiFi.status() != WL_CONNECTED) return;
+  if (isnan(dhtTemperature) || isnan(dhtHumidity)) return;
+
+  DynamicJsonDocument doc(256);
+  doc["temperature"] = serialized(String(dhtTemperature, 1));
+  doc["humidity"]    = serialized(String(dhtHumidity, 1));
+  doc["timestamp"]   = millis();
+
+  String payload;
+  serializeJson(doc, payload);
+
+  httpPostJson("/devices/" + deviceId + "/sensor", payload, true);
+}
+
 void sendHeartbeat() {
   DynamicJsonDocument doc(1024);
   doc["firmwareVersion"] = FW_VERSION;
@@ -973,6 +1018,9 @@ void sendHeartbeat() {
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["learning"] = learning.active;
   doc["activeLearningProfileId"] = learning.profileId;
+  // Kèm dữ liệu cảm biến nếu có
+  if (!isnan(dhtTemperature)) doc["temperature"] = serialized(String(dhtTemperature, 1));
+  if (!isnan(dhtHumidity))    doc["humidity"]    = serialized(String(dhtHumidity, 1));
 
   String payload;
   serializeJson(doc, payload);
@@ -1698,6 +1746,10 @@ void setup() {
     Serial.println("[OLED] Khong tim thay hardware OLED tai 0x3C, duy tri hien thi tren Serial Monitor.");
   }
 
+  // Khởi tạo DHT11
+  dht.begin();
+  Serial.printf("[DHT11] Cam bien DHT11 kich hoat tren GPIO %d\n", DHT_PIN);
+
   IRac::initState(&previousAcState);
   irSender.begin();
   irReceiver.enableIRIn();
@@ -1708,6 +1760,7 @@ void setup() {
 
   lastCommandPollAt = millis();
   lastHeartbeatAt = millis();
+  lastDhtReadAt = millis() - DHT_READ_INTERVAL_MS; // Đọc ngay sau boot
 }
 
 void loop() {
@@ -1748,6 +1801,13 @@ void loop() {
   if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
     lastHeartbeatAt = now;
     sendHeartbeat();
+  }
+
+  // Đọc cảm biến DHT11 mỗi 5 giây và gửi lên server
+  if (now - lastDhtReadAt >= DHT_READ_INTERVAL_MS) {
+    lastDhtReadAt = now;
+    readDhtSensor();
+    sendSensorData();
   }
 
   yield();

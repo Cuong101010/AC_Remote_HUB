@@ -25,6 +25,8 @@ class Storage:
         self.profiles = self._load_json(self.profiles_file, {})
         self.users    = self._load_json(self.users_file,    {})
         self.sessions = self._load_json(self.sessions_file, {})
+        # Sensor data (in-memory only, real-time): { device_id: {temperature, humidity, updatedAt} }
+        self.sensor_data: dict = {}
 
     # ------------------------------------------------------------------ helpers
     def _load_json(self, filepath, default):
@@ -426,6 +428,23 @@ class Storage:
                 self.devices[device_id]["learning"] = False
                 self.devices[device_id]["activeLearningProfileId"] = ""
                 self._save_json(self.devices_file, self.devices)
+
+    # ------------------------------------------------------------------ SENSOR DATA
+    def update_sensor_data(self, device_id, data):
+        """Lưu nhiệt độ / độ ẩm mới nhất từ ESP32 (in-memory, real-time)."""
+        with self.lock:
+            entry = self.sensor_data.get(device_id, {})
+            if data.get("temperature") is not None:
+                entry["temperature"] = data["temperature"]
+            if data.get("humidity") is not None:
+                entry["humidity"] = data["humidity"]
+            entry["updatedAt"] = time.time()
+            self.sensor_data[device_id] = entry
+
+    def get_sensor_data(self, device_id):
+        """Trả về dict nhiệt độ/độ ẩm gần nhất, hoặc {} nếu chưa có."""
+        with self.lock:
+            return dict(self.sensor_data.get(device_id, {}))
 
 
 storage = Storage()
