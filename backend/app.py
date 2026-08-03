@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -13,8 +14,35 @@ try:
 except ImportError:
     has_cors = False
 
+try:
+    import paho.mqtt.publish as publish
+    has_mqtt = True
+except ImportError:
+    has_mqtt = False
+
 BOOTSTRAP_KEY = os.getenv("DEVICE_BOOTSTRAP_KEY", "CHANGE_ME_BOOTSTRAP_KEY")
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "broker.hivemq.com")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+MQTT_BROKER_USER = os.getenv("MQTT_BROKER_USER", "")
+MQTT_BROKER_PASS = os.getenv("MQTT_BROKER_PASS", "")
+
+def publish_mqtt_command(device_id, cmd):
+    """Đẩy lệnh tức thì xuống ESP32 qua MQTT Broker (<50ms)."""
+    if not has_mqtt:
+        return
+    try:
+        topic = f"acremote/devices/{device_id}/commands"
+        payload = json.dumps({"command": cmd})
+        auth = None
+        if MQTT_BROKER_USER:
+            auth = {"username": MQTT_BROKER_USER, "password": MQTT_BROKER_PASS}
+        publish.single(topic, payload, hostname=MQTT_BROKER_HOST, port=MQTT_BROKER_PORT, auth=auth, qos=1)
+        print(f"[MQTT Instant Push] Published to topic '{topic}' (<50ms)")
+    except Exception as e:
+        print(f"[MQTT Push Warning] {e}")
+
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
+
 
 app = Flask(__name__, static_folder=WEB_DIR)
 if has_cors:
@@ -243,7 +271,8 @@ def web_control_ac(device_id):
     }
 
     cmd = storage.add_command(device_id, "SET_AC_STATE", cmd_payload)
-    print(f"[Web Control AC] Queued command {cmd['id']} for device {device_id}")
+    publish_mqtt_command(device_id, cmd)
+    print(f"[Web Control AC] Queued & Published MQTT command {cmd['id']} for device {device_id}")
     return jsonify({"success": True, "command": cmd})
 
 @app.route("/api/v1/web/devices/<device_id>/learn", methods=["POST"])
@@ -262,6 +291,7 @@ def web_start_learn(device_id):
     cmd_payload = {"profileId": profile_id, "expectedAction": expected_action,
                    "timeoutSeconds": timeout_seconds}
     cmd = storage.add_command(device_id, "START_LEARNING", cmd_payload)
+    publish_mqtt_command(device_id, cmd)
 
     with storage.lock:
         if device_id in storage.devices:
@@ -277,6 +307,7 @@ def web_cancel_learn(device_id):
     if err_resp:
         return err_resp, err_code
     cmd = storage.add_command(device_id, "CANCEL_LEARNING", {})
+    publish_mqtt_command(device_id, cmd)
     storage.set_learning_timeout(device_id, "")
     return jsonify({"success": True, "command": cmd})
 
@@ -298,6 +329,7 @@ def web_send_raw(device_id):
 
     cmd_payload = {"profileId": profile_id, "frequencyKhz": frequency_khz, "rawUs": raw_us}
     cmd = storage.add_command(device_id, "SEND_RAW", cmd_payload)
+    publish_mqtt_command(device_id, cmd)
     return jsonify({"success": True, "command": cmd})
 
 @app.route("/api/v1/web/devices/<device_id>/profiles", methods=["GET"])

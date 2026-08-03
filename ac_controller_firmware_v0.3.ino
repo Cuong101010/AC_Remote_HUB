@@ -1,6 +1,28 @@
 /*
-  AC Controller Firmware v0.2 - OLED FSM
+  AC Controller Firmware v0.3 - OLED FSM (toi uu do tre lenh + don code)
   Board: ESP32 Dev Module
+
+  Thay doi so voi v0.2:
+  - Sua loi lech hang so buffer raw (comment ghi 700 nhung mang thuc te 350) ->
+    gop lai thanh MOT hang so MAX_RAW_SAMPLES=400 dung xuyen suot.
+  - Bo vong JSON serialize/deserialize thua khi thuc thi SET_AC_STATE/SEND_RAW:
+    sendNativeAcState() va sendEncodedSignal() doc thang tu CommandMsg da parse
+    san o pollNextCommand(), khong bọc lai qua StaticJsonDocument nua.
+  - Xoa nhanh code chet (cap phat heap dong cho rawUs qua JSON) trong duong
+    SEND_RAW - rawUs tu server luon di qua CommandMsg.rawUs, khong con di qua
+    nhanh nay.
+  - Poll lenh: giam COMMAND_POLL_INTERVAL_MS tu 300ms -> 150ms, VA them co che
+    "greedy poll": ngay sau khi nhan 1 lenh, poll lai NGAY (co gioi han bang
+    CommandQueue con cho trong) thay vi doi het chu ky, giup nhieu lenh lien
+    tiep tu web toi thiet bi gan nhu tuc thi thay vi xep hang tung 150-300ms.
+  - Poll dung timeout rieng ngan hon (1.2s connect / 1.5s tong) qua
+    httpGetJsonFast() de mot request treo mang khong khoa ca vong lap
+    Network Task; heartbeat/register van dung timeout dai nhu cu.
+  - Network Task: giam vTaskDelay 50ms -> 20ms de tang do phan giai polling.
+  - Them heap-health guard: neu free heap roi duoi nguong an toan, chu dong
+    restart thay vi co gang chay tiep va co the crash giua mot request.
+  - Gop code disable/enable IR receiver quanh moi lan phat song vao 2 ham
+    dung chung: silenceReceiverForTx() / reArmReceiverAfterTx().
 
   Chức năng:
   1) WiFiManager: nếu chưa có Wi-Fi hoặc chuyển địa điểm, ESP32 mở AP cấu hình.
@@ -48,7 +70,7 @@
 // CẤU HÌNH PHẢI SỬA
 // ============================================================
 
-static const char *FW_VERSION = "0.2.0";
+static const char *FW_VERSION = "0.3.0";
 
 // Ví dụ local backend: http://192.168.1.10:3000/api/v1
 // Ví dụ cloud backend: https://api.tenmiencuaban.vn/api/v1
@@ -79,15 +101,20 @@ static const uint8_t OLED_I2C_ADDRESS = 0x3C;
 static const uint16_t IR_CAPTURE_BUFFER_SIZE = 2048;
 static const uint8_t IR_CAPTURE_TIMEOUT_MS = 80;
 
-// Giới hạn số timing raw gửi lên server trong một event.
-// Frame Electra 104-bit của bạn có 211 timing nên nằm trong giới hạn này.
-static const uint16_t MAX_RAW_TIMINGS_UPLOAD = 700;
+// Giới hạn số timing raw (learning-upload lẫn SEND_RAW từ server) dùng CHUNG một
+// hằng số duy nhất để tránh lệch giữa comment và kích thước mảng thực tế.
+// Frame Electra 104-bit có 211 timing nên 400 là đủ dư cho hầu hết remote A/C.
+static const uint16_t MAX_RAW_SAMPLES = 400;
 
 // ============================================================
 // CHU KỲ HỆ THỐNG
 // ============================================================
 
-static const unsigned long COMMAND_POLL_INTERVAL_MS = 300;
+// Chu kỳ poll tối thiểu giữa hai lần gọi /commands/next khi hàng đợi đang RỖNG.
+// Ngay khi một lệnh được xử lý xong, Network Task sẽ poll lại NGAY (xem
+// vòng lặp bên dưới) thay vì đợi đủ khoảng này — giá trị này chỉ giới hạn
+// tần suất polling lúc idle để đỡ tải backend, không phải độ trễ lệnh thực tế.
+static const unsigned long COMMAND_POLL_INTERVAL_MS = 150;
 static const unsigned long HEARTBEAT_INTERVAL_MS = 30000;
 static const unsigned long REGISTER_RETRY_INTERVAL_MS = 10000;
 static const unsigned long WIFI_RESTART_AFTER_MS = 60000;
@@ -220,7 +247,7 @@ struct CommandMsg {
   char fan[16] = {0};
   char swingV[16] = {0};
 
-  uint16_t rawUs[350];
+  uint16_t rawUs[MAX_RAW_SAMPLES];
   uint16_t rawCount = 0;
   uint16_t frequencyKhz = 38;
 };
@@ -248,7 +275,7 @@ struct CloudMsg {
   char description[128] = {0};
   bool nativeSendSupported = false;
   bool commonDecoded = false;
-  uint16_t rawUs[350];
+  uint16_t rawUs[MAX_RAW_SAMPLES];
   uint16_t rawCount = 0;
 };
 
@@ -587,11 +614,13 @@ void goToBaseDisplayState() {
   setDisplayState(DisplayState::STATE_PAIRING_CODE);
 }
 
-void showCommandEvent(JsonObject command, const String &type) {
+// Nhận trực tiếp giá trị đã parse sẵn (không cần bọc lại qua JsonObject) để
+// tránh một vòng serialize/deserialize thừa mỗi khi có lệnh mới từ web.
+void showCommandEvent(bool power, int temperature, const String &mode, const String &type) {
   commandScreen.commandType = type;
-  commandScreen.power = command["power"] | false;
-  commandScreen.temperature = static_cast<int>(command["temperature"] | 26.0);
-  commandScreen.mode = String(command["mode"] | (type == "SEND_RAW" ? "RAW" : "AUTO"));
+  commandScreen.power = power;
+  commandScreen.temperature = temperature;
+  commandScreen.mode = mode;
   commandScreen.mode.toUpperCase();
   commandScreen.resultKnown = false;
   commandScreen.resultOk = false;
@@ -687,7 +716,10 @@ String apiUrl(const String &path) {
     return base + path;
   }
 
-  void initHttpClient() {
+  return base + "/" + path;
+}
+
+void initHttpClient() {
   // Safe empty initializer
 }
 
@@ -700,7 +732,9 @@ HttpResponse executeHttpJson(
   const String &url,
   const String &payload,
   const bool useDeviceToken,
-  const bool useBootstrapKey = false
+  const bool useBootstrapKey = false,
+  const uint16_t timeoutMsOverride = 0,
+  const uint16_t connectTimeoutMsOverride = 0
 ) {
   HttpResponse response;
   const unsigned long startMs = millis();
@@ -709,10 +743,15 @@ HttpResponse executeHttpJson(
     g_secureClient.setInsecure();
     g_secureClient.setTimeout(3);
     g_httpClient.setReuse(true);
-    g_httpClient.setTimeout(3000);
-    g_httpClient.setConnectTimeout(2500);
     g_httpInited = true;
   }
+
+  // Cho phép mỗi lời gọi tự chọn timeout: request polling (chạy mỗi 150ms)
+  // dùng timeout ngắn để một lần treo mạng không khoá cả vòng lặp Network
+  // Task; request ít quan trọng về độ trễ (heartbeat, register) vẫn dùng
+  // timeout dài hơn để chịu được kết nối chậm mà không bị false-fail.
+  g_httpClient.setTimeout(timeoutMsOverride > 0 ? timeoutMsOverride : 3000);
+  g_httpClient.setConnectTimeout(connectTimeoutMsOverride > 0 ? connectTimeoutMsOverride : 2500);
 
   WiFiClient plainClient;
   bool begun = false;
@@ -773,6 +812,12 @@ HttpResponse executeHttpJson(
 
 HttpResponse httpGetJson(const String &path, const bool auth = true) {
   return executeHttpJson("GET", apiUrl(path), "", auth, false);
+}
+
+// Dùng riêng cho poll lệnh: timeout ngắn (1.2s connect / 1.5s tổng) để một
+// request treo không giữ Network Task lâu, giữ độ trễ lệnh ổn định.
+HttpResponse httpGetJsonFast(const String &path, const bool auth = true) {
+  return executeHttpJson("GET", apiUrl(path), "", auth, false, 1500, 1200);
 }
 
 HttpResponse httpPostJson(
@@ -1225,7 +1270,7 @@ bool uploadLearnedSignal(const decode_results &results) {
   msg.commonDecoded = IRAcUtils::decodeToState(&results, &commonState, nullptr);
 
   const uint16_t availableRawCount = results.rawlen > 0 ? results.rawlen - 1 : 0;
-  const uint16_t rawCount = availableRawCount < 350 ? availableRawCount : 350;
+  const uint16_t rawCount = availableRawCount < MAX_RAW_SAMPLES ? availableRawCount : MAX_RAW_SAMPLES;
   msg.rawCount = rawCount;
 
   for (uint16_t i = 1; i <= rawCount; i++) {
@@ -1365,12 +1410,30 @@ void processLearningTimeout() {
 // PHÁT IR NATIVE / RAW
 // ============================================================
 
-bool sendNativeAcState(JsonObject command, String &errorMessage) {
-  const String protocolText = command["protocol"] | "";
-  const decode_type_t protocol = strToDecodeType(protocolText.c_str());
+// Tắt/mở lại mắt thu IR quanh một lần phát sóng — dùng chung cho cả đường
+// native (IRac), encode (protocol/bits/code) và raw us, tránh lặp code.
+void silenceReceiverForTx() {
+  irReceiver.disableIRIn();
+  yield();
+}
+
+void reArmReceiverAfterTx() {
+  yield();
+  delay(50); // Đợi sóng phát tan hết trước khi mở lại mắt thu, tránh tự nhại lại (self-echo)
+  if (!learning.active) {
+    irReceiver.enableIRIn();
+    irReceiver.resume();
+  }
+}
+
+// Nhận thẳng CommandMsg (đã parse 1 lần ở pollNextCommand) thay vì bọc lại
+// qua StaticJsonDocument rồi đọc ra — bớt một vòng serialize/deserialize
+// ArduinoJson không cần thiết trên mỗi lệnh SET_AC_STATE (giảm CPU + heap churn).
+bool sendNativeAcState(const CommandMsg &cmd, String &errorMessage) {
+  const decode_type_t protocol = strToDecodeType(cmd.protocol);
 
   if (protocol == decode_type_t::UNKNOWN) {
-    errorMessage = "Unknown protocol string: " + protocolText;
+    errorMessage = String("Unknown protocol string: ") + cmd.protocol;
     return false;
   }
 
@@ -1383,66 +1446,28 @@ bool sendNativeAcState(JsonObject command, String &errorMessage) {
   IRac::initState(&desired);
 
   desired.protocol = protocol;
-  desired.model = command["model"] | -1;
-  desired.power = command["power"] | false;
-  desired.celsius = command["celsius"] | true;
-  desired.degrees = command["temperature"] | 26.0;
+  desired.power = cmd.power;
+  desired.celsius = true;
+  desired.degrees = cmd.temperature;
 
-  const String modeText = command["mode"] | "auto";
-  const String fanText = command["fan"] | "auto";
-  const String swingVText = command["swingV"] | "off";
-  const String swingHText = command["swingH"] | "off";
+  desired.mode = IRac::strToOpmode(cmd.mode, stdAc::opmode_t::kAuto);
+  desired.fanspeed = IRac::strToFanspeed(cmd.fan, stdAc::fanspeed_t::kAuto);
+  desired.swingv = IRac::strToSwingV(cmd.swingV, stdAc::swingv_t::kOff);
+  desired.swingh = stdAc::swingh_t::kOff;
 
-  desired.mode = IRac::strToOpmode(
-    modeText.c_str(),
-    stdAc::opmode_t::kAuto
-  );
-  desired.fanspeed = IRac::strToFanspeed(
-    fanText.c_str(),
-    stdAc::fanspeed_t::kAuto
-  );
-  desired.swingv = IRac::strToSwingV(
-    swingVText.c_str(),
-    stdAc::swingv_t::kOff
-  );
-  desired.swingh = IRac::strToSwingH(
-    swingHText.c_str(),
-    stdAc::swingh_t::kOff
-  );
-
-  desired.quiet = command["quiet"] | false;
-  desired.turbo = command["turbo"] | false;
-  desired.econo = command["econo"] | false;
-  desired.light = command["light"] | false;
-  desired.filter = command["filter"] | false;
-  desired.clean = command["clean"] | false;
-  desired.beep = command["beep"] | false;
-  desired.sleep = command["sleep"] | -1;
-  desired.clock = command["clock"] | -1;
-
-  const String profileId = command["profileId"] | "";
+  const String profileId = cmd.profileId;
 
   const bool canUsePrevious =
     hasPreviousAcState &&
     profileId == previousProfileId &&
     protocol == previousProtocol;
 
-  // Tắt mắt thu IR trước khi phát để tránh hiện tượng tự nhại lại (self-echo)
-  irReceiver.disableIRIn();
-  yield();
-
+  silenceReceiverForTx();
   const bool sent = universalAc.sendAc(
     desired,
     canUsePrevious ? &previousAcState : nullptr
   );
-
-  // Đợi 50ms cho chùm sóng phát tan hết rồi mới mở lại mắt thu
-  delay(50);
-  yield();
-  if (!learning.active) {
-    irReceiver.enableIRIn();
-    irReceiver.resume();
-  }
+  reArmReceiverAfterTx();
 
   if (!sent) {
     errorMessage = "IRac::sendAc returned false";
@@ -1457,94 +1482,51 @@ bool sendNativeAcState(JsonObject command, String &errorMessage) {
   return true;
 }
 
-bool sendRawSignal(JsonObject command, String &errorMessage) {
-  const String protocolStr = command["protocol"] | "";
-  const String codeStr = command["code"] | "";
-  const uint16_t bits = command["bits"] | 0;
-  const uint16_t repeatCount = command["repeatCount"] | 0;
-  const uint32_t addressVal = command["address"] | 0;
-  const uint32_t commandVal = command["commandCode"] | 0;
-
-  decode_type_t protocol = strToDecodeType(protocolStr.c_str());
+// Phát lệnh IR khi server gửi protocol/bits/code nhưng KHÔNG có mảng rawUs kèm
+// theo (trường hợp có rawUs được xử lý thẳng ở processCommandMsg, không đi qua
+// hàm này — nên không cần nhánh JsonArray + cấp phát heap động nữa).
+bool sendEncodedSignal(const CommandMsg &cmd, String &errorMessage) {
+  const decode_type_t protocol = strToDecodeType(cmd.protocol);
   uint64_t codeVal = 0;
 
-  if (!codeStr.isEmpty()) {
-    if (codeStr.startsWith("0x") || codeStr.startsWith("0X")) {
-      codeVal = strtoull(codeStr.c_str() + 2, NULL, 16);
+  if (strlen(cmd.codeStr) > 0) {
+    if (cmd.codeStr[0] == '0' && (cmd.codeStr[1] == 'x' || cmd.codeStr[1] == 'X')) {
+      codeVal = strtoull(cmd.codeStr + 2, NULL, 16);
     } else {
-      codeVal = strtoull(codeStr.c_str(), NULL, 10);
+      codeVal = strtoull(cmd.codeStr, NULL, 10);
     }
   }
 
-  // Tắt mắt thu IR trước khi phát để tránh hiện tượng tự nhại lại (self-echo)
-  irReceiver.disableIRIn();
-  yield();
-
-  bool sentSuccess = false;
-  if (protocol != decode_type_t::UNKNOWN && bits > 0) {
-    uint64_t transmitCode = codeVal;
-    if (protocol == decode_type_t::NEC && (addressVal > 0 || commandVal > 0)) {
-      transmitCode = irSender.encodeNEC(addressVal, commandVal);
-    }
-    const uint16_t effectiveRepeat = (repeatCount > 0) ? repeatCount : 1;
-    if (transmitCode > 0) {
-      sentSuccess = irSender.send(protocol, transmitCode, bits, effectiveRepeat);
-      if (sentSuccess) {
-        Serial.printf("[IR TRANSMIT] Sent via Protocol=%s, Code=0x%llX (Addr=0x%X, Cmd=0x%X), Bits=%d, Repeat=%d\n",
-                      protocolStr.c_str(), transmitCode, addressVal, commandVal, bits, effectiveRepeat);
-      }
-    }
-  }
-
-  if (!sentSuccess) {
-    JsonArray rawArray = command["rawUs"].as<JsonArray>();
-    if (!rawArray.isNull() && rawArray.size() > 0 && rawArray.size() <= 1200) {
-      const uint16_t frequencyKhz = command["frequencyKhz"] | 38;
-      const size_t count = rawArray.size();
-      if (ESP.getFreeHeap() < count * 4 + 2048) {
-        errorMessage = "Free Heap text qua thap, khong the phat RAW";
-      } else {
-        uint16_t *rawData = new (std::nothrow) uint16_t[count];
-        if (rawData != nullptr) {
-          size_t index = 0;
-          for (JsonVariant value : rawArray) {
-            const uint32_t timing = value.as<uint32_t>();
-            rawData[index++] = static_cast<uint16_t>(timing > 65535UL ? 65535UL : timing);
-          }
-          irSender.sendRaw(rawData, count, frequencyKhz);
-          delete[] rawData;
-          sentSuccess = true;
-          Serial.printf("[IR TRANSMIT] Sent via RAW us (count=%d)\n", count);
-        } else {
-          errorMessage = "Not enough heap for raw data";
-        }
-      }
-    } else {
-      errorMessage = "rawUs is empty or invalid";
-    }
-  }
-  yield();
-
-  // Đợi 50ms cho sóng phát tan hết rồi mới kích hoạt lại mắt thu
-  delay(50);
-  if (!learning.active) {
-    irReceiver.enableIRIn();
-    irReceiver.resume();
-  }
-
-  if (!sentSuccess) {
-    if (errorMessage.isEmpty()) {
-      errorMessage = "Could not send IR signal";
-    }
+  if (protocol == decode_type_t::UNKNOWN || cmd.bits == 0) {
+    errorMessage = "Missing rawUs and no valid protocol/bits/code to encode";
     return false;
   }
 
-  return true;
-}
+  uint64_t transmitCode = codeVal;
+  if (protocol == decode_type_t::NEC && (cmd.address > 0 || cmd.commandCode > 0)) {
+    transmitCode = irSender.encodeNEC(cmd.address, cmd.commandCode);
+  }
 
-// ============================================================
-// XỬ LÝ COMMAND TỪ SERVER
-// ============================================================
+  if (transmitCode == 0) {
+    errorMessage = "Could not resolve a code to transmit";
+    return false;
+  }
+
+  const uint16_t effectiveRepeat = (cmd.repeatCount > 0) ? cmd.repeatCount : 1;
+
+  silenceReceiverForTx();
+  const bool sentSuccess = irSender.send(protocol, transmitCode, cmd.bits, effectiveRepeat);
+  reArmReceiverAfterTx();
+
+  if (sentSuccess) {
+    Serial.printf("[IR TRANSMIT] Sent via Protocol=%s, Code=0x%llX (Addr=0x%X, Cmd=0x%X), Bits=%d, Repeat=%d\n",
+                  cmd.protocol, transmitCode, cmd.address, cmd.commandCode, cmd.bits, effectiveRepeat);
+  } else {
+    errorMessage = "Could not send IR signal";
+  }
+
+  return sentSuccess;
+}
 
 // ============================================================
 // XỬ LÝ COMMAND TỪ SERVER (CHẠY TRÊN CORE 1)
@@ -1589,17 +1571,10 @@ void processCommandMsg(const CommandMsg &cmd) {
   }
 
   if (cmd.type == CMD_SET_AC_STATE) {
-    StaticJsonDocument<512> dummyDoc;
-    dummyDoc["protocol"] = cmd.protocol;
-    dummyDoc["power"] = cmd.power;
-    dummyDoc["temperature"] = cmd.temperature;
-    dummyDoc["mode"] = cmd.mode;
-    dummyDoc["fan"] = cmd.fan;
-    dummyDoc["swingV"] = cmd.swingV;
-    showCommandEvent(dummyDoc.as<JsonObject>(), "SET_AC_STATE");
+    showCommandEvent(cmd.power, static_cast<int>(cmd.temperature), String(cmd.mode), "SET_AC_STATE");
 
     String errorMessage;
-    const bool ok = sendNativeAcState(dummyDoc.as<JsonObject>(), errorMessage);
+    const bool ok = sendNativeAcState(cmd, errorMessage);
     updateCommandEventResult(ok);
 
     acknowledgeCommand(
@@ -1611,31 +1586,19 @@ void processCommandMsg(const CommandMsg &cmd) {
   }
 
   if (cmd.type == CMD_SEND_RAW) {
-    StaticJsonDocument<512> dummyDoc;
-    dummyDoc["protocol"] = cmd.protocol;
-    dummyDoc["code"] = cmd.codeStr;
-    dummyDoc["bits"] = cmd.bits;
-    dummyDoc["repeatCount"] = cmd.repeatCount;
-    dummyDoc["address"] = cmd.address;
-    dummyDoc["commandCode"] = cmd.commandCode;
-    showCommandEvent(dummyDoc.as<JsonObject>(), "SEND_RAW");
+    showCommandEvent(false, 26, cmd.rawCount > 0 ? "RAW" : String(cmd.protocol), "SEND_RAW");
 
     String errorMessage;
     bool ok = false;
 
     if (cmd.rawCount > 0) {
-      irReceiver.disableIRIn();
-      yield();
+      silenceReceiverForTx();
       irSender.sendRaw(cmd.rawUs, cmd.rawCount, cmd.frequencyKhz);
-      delay(50);
-      if (!learning.active) {
-        irReceiver.enableIRIn();
-        irReceiver.resume();
-      }
+      reArmReceiverAfterTx();
       ok = true;
       Serial.printf("[IR TRANSMIT] Sent via RAW us (count=%d, freq=%d kHz)\n", cmd.rawCount, cmd.frequencyKhz);
     } else {
-      ok = sendRawSignal(dummyDoc.as<JsonObject>(), errorMessage);
+      ok = sendEncodedSignal(cmd, errorMessage);
     }
 
     updateCommandEventResult(ok);
@@ -1671,7 +1634,7 @@ void processCommandMsg(const CommandMsg &cmd) {
   acknowledgeCommand(cmd.id, "failed", "Unsupported command type");
 }
 
-void pollNextCommand() {
+bool pollNextCommand() {
   char path[128];
   if (!lastCommandId.isEmpty()) {
     snprintf(path, sizeof(path), "/devices/%s/commands/next?after=%s", deviceId.c_str(), lastCommandId.c_str());
@@ -1679,23 +1642,23 @@ void pollNextCommand() {
     snprintf(path, sizeof(path), "/devices/%s/commands/next", deviceId.c_str());
   }
 
-  const HttpResponse response = httpGetJson(path, true);
+  const HttpResponse response = httpGetJsonFast(path, true);
 
   if (response.code == 204) {
     if (!devicePaired) {
       savePairedState(true);
     }
-    return;
+    return false;
   }
 
   if (response.code == 401 || response.code == 403) {
     Serial.println("Polling bi tu choi token. Dang ky lai thiet bi.");
     clearDeviceToken();
-    return;
+    return false;
   }
 
   if (response.code != 200) {
-    return;
+    return false;
   }
 
   Serial.printf("[Poll HTTP 200] Body: %s\n", response.body.c_str());
@@ -1705,7 +1668,7 @@ void pollNextCommand() {
 
   if (error) {
     Serial.printf("[Poll Error] Lỗi parse JSON: %s\n", error.c_str());
-    return;
+    return false;
   }
 
   JsonObject command = doc.as<JsonObject>();
@@ -1714,19 +1677,19 @@ void pollNextCommand() {
   }
 
   if (command.isNull() || command.size() == 0) {
-    return;
+    return false;
   }
 
   const String commandId = command["id"] | "";
   const String type = command["type"] | "";
 
   if (commandId.isEmpty() || type.isEmpty()) {
-    return;
+    return false;
   }
 
   if (commandId == lastCommandId) {
     Serial.printf("[Poll] Command ID=%s trung voi lastCommandId (%s), bo qua.\n", commandId.c_str(), lastCommandId.c_str());
-    return;
+    return false;
   }
 
   // Ghi nhận ngay lập tức ID lệnh vừa nhận để lần poll sau (sau 2s) truyền after=lastCommandId
@@ -1766,7 +1729,7 @@ void pollNextCommand() {
   if (!rawArr.isNull()) {
     cmdMsg.rawCount = 0;
     for (uint16_t val : rawArr) {
-      if (cmdMsg.rawCount < 350) {
+      if (cmdMsg.rawCount < MAX_RAW_SAMPLES) {
         cmdMsg.rawUs[cmdMsg.rawCount++] = val;
       }
     }
@@ -1775,6 +1738,8 @@ void pollNextCommand() {
   if (xCommandQueue != NULL) {
     xQueueSend(xCommandQueue, &cmdMsg, 0);
   }
+
+  return true;
 }
 
 void processCloudQueue() {
@@ -1891,16 +1856,32 @@ void setup() {
   xTaskCreatePinnedToCore(
     [](void *pvParameters) {
       Serial.println("[FreeRTOS] Network Task khoi chay thanh cong tren Core 0 (Chuu quyen HTTP)");
+      // Bảo vệ chống rò rỉ heap lâu dài: nếu bộ nhớ trống rơi xuống mức nguy
+      // hiểm, tự khởi động lại thay vì tiếp tục chạy và có nguy cơ crash giữa
+      // một request (giữ hệ thống "chạy ổn định" 24/7).
+      static const uint32_t MIN_SAFE_HEAP_BYTES = 20000;
+
       for (;;) {
         if (WiFi.status() == WL_CONNECTED) {
           ensureDeviceRegistered();
           if (!deviceToken.isEmpty()) {
             const unsigned long now = millis();
 
-            // 1. Poll command tu server va nạp vao CommandQueue
+            // 1. Poll lệnh từ server. Nếu có lệnh mới, poll lại NGAY LẬP TỨC
+            //    (không đợi hết COMMAND_POLL_INTERVAL_MS) để rút ngắn tối đa
+            //    thời gian phản hồi khi có nhiều lệnh liên tiếp từ web.
             if (now - lastCommandPollAt >= COMMAND_POLL_INTERVAL_MS) {
               lastCommandPollAt = now;
-              pollNextCommand();
+              // Chỉ drain liên tục khi CommandQueue còn chỗ trống — nếu Core 1
+              // (thực thi IR) chưa kịp xử lý kịp, dừng lại và để lần poll kế
+              // tiếp (150ms sau) tiếp tục, tránh làm tràn queue và rớt lệnh.
+              while (
+                xCommandQueue != NULL &&
+                uxQueueSpacesAvailable(xCommandQueue) > 1 &&
+                pollNextCommand()
+              ) {
+                lastCommandPollAt = millis();
+              }
             }
 
             // 2. Gui phan hoi ACK va upload IR signal tu CloudQueue
@@ -1910,10 +1891,17 @@ void setup() {
             if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
               lastHeartbeatAt = now;
               sendHeartbeat();
+
+              if (ESP.getFreeHeap() < MIN_SAFE_HEAP_BYTES) {
+                Serial.printf("[Network Task] Free heap qua thap (%u bytes). Restart de phong ngua crash.\n", ESP.getFreeHeap());
+                ESP.restart();
+              }
             }
           }
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        // 20ms thay vi 50ms: tang do phan giai cua vong lap polling/ack ma
+        // van de CPU ranh cho Core 0 idle task va WiFi stack.
+        vTaskDelay(pdMS_TO_TICKS(20));
       }
     },
     "NetworkTask",

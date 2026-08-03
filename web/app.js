@@ -580,6 +580,13 @@ document.getElementById("chk-light").addEventListener("change", e => state.acSta
 // SEND COMMAND
 document.getElementById("btn-send-ac-state").addEventListener("click", async () => {
     if (!state.activeDeviceId) { showToast("Chưa chọn thiết bị ESP32!", true); return; }
+
+    const currentProf = state.profiles.find(p => p.profileId === state.activeProfileId);
+    if (!state.acState.protocol || state.acState.protocol === "UNKNOWN" || state.acState.protocol === "RAW") {
+        showToast("⚠️ Hồ sơ này chưa nhận diện được Hãng điều hòa! Vui lòng bấm 1 nút trên remote gốc để quét Hãng, hoặc phát lệnh IR thủ công ở bên dưới.", true);
+        return;
+    }
+
     showToast("Đang gửi lệnh tới ESP32...");
     const payload = { ...state.acState, profileId: state.activeProfileId || "default_profile" };
     const res = await apiFetch(`/api/v1/web/devices/${state.activeDeviceId}/control`, {
@@ -606,7 +613,11 @@ async function pollCommandStatus(commandId) {
                 showToast(`ESP32 đã thực thi lệnh OK ✅`);
             } else if (status === "failed") {
                 clearInterval(interval);
-                showToast(`Lệnh thất bại: ${res.command.ackMessage || ""}`, true);
+                let msg = res.command.ackMessage || "";
+                if (msg.includes("Protocol is not supported")) {
+                    msg = "Hãng điều hòa này không hỗ trợ mã hóa Native. Vui lòng phát bằng danh sách lệnh IR đã học bên dưới!";
+                }
+                showToast(`Lệnh thất bại: ${msg}`, true);
             }
         }
         if (attempts > 15) clearInterval(interval);
