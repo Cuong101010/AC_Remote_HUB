@@ -851,8 +851,17 @@ void setup() {
   // Khởi tạo màn hình OLED I2C (GPIO21 / GPIO22)
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
   Wire.setClock(400000);
-  oled.begin();
-  oledReady = true;
+  Wire.beginTransmission(0x3C);
+  if (Wire.endTransmission() == 0) {
+    oled.begin();
+    oled.setFont(u8x8_font_chroma48medium8_r);
+    oled.clear();
+    oledReady = true;
+    Serial.println("[OLED] Da kich hoat va khoi tao OLED thanh cong (Address: 0x3C)");
+  } else {
+    oledReady = false;
+    Serial.println("[OLED] Khong tim thay hardware OLED tai 0x3C, bypass hien thi.");
+  }
 
   wifiConfigApName = "AC-HUB-" + deviceId.substring(deviceId.length() - 4);
 
