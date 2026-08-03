@@ -87,7 +87,7 @@ static const uint16_t MAX_RAW_TIMINGS_UPLOAD = 700;
 // CHU KỲ HỆ THỐNG
 // ============================================================
 
-static const unsigned long COMMAND_POLL_INTERVAL_MS = 300;
+static const unsigned long COMMAND_POLL_INTERVAL_MS = 2000;
 static const unsigned long HEARTBEAT_INTERVAL_MS = 30000;
 static const unsigned long REGISTER_RETRY_INTERVAL_MS = 10000;
 static const unsigned long WIFI_RESTART_AFTER_MS = 60000;
@@ -185,75 +185,6 @@ bool displayDirty = true;
 CommandScreenData commandScreen;
 String learnedProtocolScreen;
 uint16_t learnedBitsScreen = 0;
-
-// ============================================================
-// FREERTOS TWO-WAY QUEUES (OWNERSHIP ARCHITECTURE)
-// ============================================================
-
-enum CommandType {
-  CMD_NONE,
-  CMD_SET_AC_STATE,
-  CMD_SEND_RAW,
-  CMD_START_LEARNING,
-  CMD_CANCEL_LEARNING,
-  CMD_RESET_WIFI,
-  CMD_FACTORY_RESET,
-  CMD_PING
-};
-
-struct CommandMsg {
-  CommandType type = CMD_NONE;
-  char id[64] = {0};
-  char profileId[64] = {0};
-  char expectedAction[64] = {0};
-  uint32_t timeoutSeconds = 45;
-
-  char protocol[32] = {0};
-  char codeStr[32] = {0};
-  uint16_t bits = 0;
-  uint16_t repeatCount = 0;
-  uint32_t address = 0;
-  uint32_t commandCode = 0;
-  bool power = false;
-  float temperature = 26.0;
-  char mode[16] = {0};
-  char fan[16] = {0};
-  char swingV[16] = {0};
-
-  uint16_t rawUs[350];
-  uint16_t rawCount = 0;
-  uint16_t frequencyKhz = 38;
-};
-
-enum CloudMsgType {
-  CLOUD_ACK_COMMAND,
-  CLOUD_UPLOAD_LEARNED_SIGNAL
-};
-
-struct CloudMsg {
-  CloudMsgType type;
-  char commandId[64] = {0};
-  char status[32] = {0};
-  char message[128] = {0};
-
-  char profileId[64] = {0};
-  char expectedAction[64] = {0};
-  char protocol[32] = {0};
-  uint16_t bits = 0;
-  char codeHex[64] = {0};
-  uint32_t address = 0;
-  uint32_t commandCode = 0;
-  bool repeat = false;
-  char stateHex[128] = {0};
-  char description[128] = {0};
-  bool nativeSendSupported = false;
-  bool commonDecoded = false;
-  uint16_t rawUs[350];
-  uint16_t rawCount = 0;
-};
-
-QueueHandle_t xCommandQueue = NULL; // Core 0 -> Core 1
-QueueHandle_t xCloudQueue = NULL;   // Core 1 -> Core 0
 
 void renderDisplay();
 void goToBaseDisplayState();
@@ -687,13 +618,8 @@ String apiUrl(const String &path) {
     return base + path;
   }
 
-  void initHttpClient() {
-  // Safe empty initializer
+  return base + "/" + path;
 }
-
-static WiFiClientSecure g_secureClient;
-static HTTPClient g_httpClient;
-static bool g_httpInited = false;
 
 HttpResponse executeHttpJson(
   const String &method,
@@ -703,71 +629,62 @@ HttpResponse executeHttpJson(
   const bool useBootstrapKey = false
 ) {
   HttpResponse response;
-  const unsigned long startMs = millis();
+  HTTPClient http;
 
-  if (!g_httpInited) {
-    g_secureClient.setInsecure();
-    g_secureClient.setTimeout(3);
-    g_httpClient.setReuse(true);
-    g_httpClient.setTimeout(3000);
-    g_httpClient.setConnectTimeout(2500);
-    g_httpInited = true;
-  }
-
+  // Hai client phai song den het request. Code cu khai bao secureClient
+  // ben trong khoi if, nen doi tuong bi huy truoc http.GET()/POST().
   WiFiClient plainClient;
+  WiFiClientSecure secureClient;
   bool begun = false;
 
   if (url.startsWith("https://")) {
-    begun = g_httpClient.begin(g_secureClient, url);
+    secureClient.setInsecure();
+    begun = http.begin(secureClient, url);
   } else {
-    plainClient.setTimeout(3);
-    begun = g_httpClient.begin(plainClient, url);
+    begun = http.begin(plainClient, url);
   }
 
   if (!begun) {
     response.error = "HTTP begin failed";
-    g_httpClient.end();
     return response;
   }
 
-  g_httpClient.addHeader("Accept", "application/json");
-  g_httpClient.addHeader("Content-Type", "application/json");
-  g_httpClient.addHeader("X-Device-Id", deviceId);
+  http.setConnectTimeout(5000);
+  http.setTimeout(10000);
+  http.setReuse(false);
+  http.addHeader("Accept", "application/json");
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("X-Device-Id", deviceId);
 
   if (useDeviceToken && !deviceToken.isEmpty()) {
-    g_httpClient.addHeader("Authorization", "Bearer " + deviceToken);
+    http.addHeader("Authorization", "Bearer " + deviceToken);
   }
 
   if (useBootstrapKey) {
-    g_httpClient.addHeader("X-Device-Bootstrap-Key", DEVICE_BOOTSTRAP_KEY);
+    http.addHeader("X-Device-Bootstrap-Key", DEVICE_BOOTSTRAP_KEY);
   }
 
   if (method == "GET") {
-    response.code = g_httpClient.GET();
+    response.code = http.GET();
   } else if (method == "POST") {
-    response.code = g_httpClient.POST(payload);
+    response.code = http.POST(payload);
   } else {
     response.error = "Unsupported HTTP method";
-    g_httpClient.end();
+    http.end();
     return response;
   }
 
-  const unsigned long durationMs = millis() - startMs;
-
   if (response.code > 0) {
-    response.body = g_httpClient.getString();
-    if (response.code != 204 && response.code != 200) {
-      Serial.printf("[HTTP] %s %s -> Code=%d (%lu ms)\n", method.c_str(), url.c_str(), response.code, durationMs);
-    }
+    response.body = http.getString();
   } else {
-    response.error = g_httpClient.errorToString(response.code);
-    g_httpClient.end(); // Reset socket nếu bị ngắt kết nối mạng
+    response.error = http.errorToString(response.code);
   }
 
   if (response.code >= 200 && response.code < 300) {
     markCloudSuccess();
   }
 
+  http.end();
   return response;
 }
 
@@ -1047,7 +964,7 @@ void ensureDeviceRegistered() {
 }
 
 void sendHeartbeat() {
-  StaticJsonDocument<512> doc;
+  DynamicJsonDocument doc(1024);
   doc["firmwareVersion"] = FW_VERSION;
   doc["ip"] = WiFi.localIP().toString();
   doc["ssid"] = WiFi.SSID();
@@ -1057,14 +974,11 @@ void sendHeartbeat() {
   doc["learning"] = learning.active;
   doc["activeLearningProfileId"] = learning.profileId;
 
-  char payload[512];
-  serializeJson(doc, payload, sizeof(payload));
-
-  char path[128];
-  snprintf(path, sizeof(path), "/devices/%s/heartbeat", deviceId.c_str());
+  String payload;
+  serializeJson(doc, payload);
 
   const HttpResponse response = httpPostJson(
-    path,
+    "/devices/" + deviceId + "/heartbeat",
     payload,
     true
   );
@@ -1102,14 +1016,25 @@ void acknowledgeCommand(
     return;
   }
 
-  CloudMsg msg;
-  msg.type = CLOUD_ACK_COMMAND;
-  strncpy(msg.commandId, commandId.c_str(), sizeof(msg.commandId) - 1);
-  strncpy(msg.status, status.c_str(), sizeof(msg.status) - 1);
-  strncpy(msg.message, message.c_str(), sizeof(msg.message) - 1);
+  DynamicJsonDocument doc(768);
+  doc["status"] = status;
+  doc["message"] = message;
+  doc["deviceTimeMs"] = millis();
 
-  if (xCloudQueue != NULL) {
-    xQueueSend(xCloudQueue, &msg, 0);
+  String payload;
+  serializeJson(doc, payload);
+
+  const HttpResponse response = httpPostJson(
+    "/devices/" + deviceId + "/commands/" + commandId + "/ack",
+    payload,
+    true
+  );
+
+  if (response.code >= 200 && response.code < 300) {
+    lastCommandId = commandId;
+    preferences.putString("lastCmd", lastCommandId);
+  } else {
+    Serial.printf("ACK command loi HTTP=%d\n", response.code);
   }
 }
 
@@ -1203,40 +1128,82 @@ void addCommonAcStateToJson(
 }
 
 bool uploadLearnedSignal(const decode_results &results) {
-  CloudMsg msg;
-  msg.type = CLOUD_UPLOAD_LEARNED_SIGNAL;
-  strncpy(msg.commandId, learning.commandId.c_str(), sizeof(msg.commandId) - 1);
-  strncpy(msg.profileId, learning.profileId.c_str(), sizeof(msg.profileId) - 1);
-  strncpy(msg.expectedAction, learning.expectedAction.c_str(), sizeof(msg.expectedAction) - 1);
-
   const String protocolName = typeToString(results.decode_type);
-  strncpy(msg.protocol, protocolName.c_str(), sizeof(msg.protocol) - 1);
-  msg.bits = results.bits;
-  strncpy(msg.codeHex, resultToHexidecimal(&results).c_str(), sizeof(msg.codeHex) - 1);
-  msg.address = results.address;
-  msg.commandCode = results.command;
-  msg.repeat = results.repeat;
-  strncpy(msg.stateHex, stateBytesToHex(results).c_str(), sizeof(msg.stateHex) - 1);
-  strncpy(msg.description, IRAcUtils::resultAcToString(&results).c_str(), sizeof(msg.description) - 1);
+  const bool nativeSendSupported = IRac::isProtocolSupported(
+    results.decode_type
+  );
 
-  msg.nativeSendSupported = IRac::isProtocolSupported(results.decode_type);
   stdAc::state_t commonState;
   IRac::initState(&commonState);
-  msg.commonDecoded = IRAcUtils::decodeToState(&results, &commonState, nullptr);
 
-  const uint16_t availableRawCount = results.rawlen > 0 ? results.rawlen - 1 : 0;
-  const uint16_t rawCount = availableRawCount < 350 ? availableRawCount : 350;
-  msg.rawCount = rawCount;
+  const bool commonDecoded = IRAcUtils::decodeToState(
+    &results,
+    &commonState,
+    nullptr
+  );
 
-  for (uint16_t i = 1; i <= rawCount; i++) {
-    msg.rawUs[i - 1] = static_cast<uint32_t>(results.rawbuf[i]) * kRawTick;
+  // 32 KB phù hợp với frame điều hòa phổ biến + raw timing.
+  DynamicJsonDocument doc(32768);
+  doc["event"] = "IR_SIGNAL_LEARNED";
+  doc["deviceId"] = deviceId;
+  doc["commandId"] = learning.commandId;
+  doc["profileId"] = learning.profileId;
+  doc["expectedAction"] = learning.expectedAction;
+  doc["protocol"] = protocolName;
+  doc["protocolId"] = static_cast<int>(results.decode_type);
+  doc["bits"] = results.bits;
+  doc["code"] = resultToHexidecimal(&results);
+  doc["address"] = results.address;
+  doc["commandCode"] = results.command;
+  doc["repeatCount"] = results.repeat ? 1 : 0;
+  doc["stateHex"] = stateBytesToHex(results);
+  doc["description"] = IRAcUtils::resultAcToString(&results);
+  doc["nativeSendSupported"] = nativeSendSupported;
+  doc["commonDecoded"] = commonDecoded;
+  doc["controlType"] =
+    (commonDecoded && nativeSendSupported) ? "NATIVE" : "RAW";
+
+  if (commonDecoded) {
+    JsonObject common = doc.createNestedObject("commonState");
+    addCommonAcStateToJson(common, commonState);
   }
 
-  const bool nativeSendSupported = msg.nativeSendSupported;
-  const bool commonDecoded = msg.commonDecoded;
+  JsonArray raw = doc.createNestedArray("rawUs");
+  const uint16_t availableRawCount =
+    results.rawlen > 0 ? results.rawlen - 1 : 0;
+  const uint16_t rawCount =
+    availableRawCount < MAX_RAW_TIMINGS_UPLOAD
+      ? availableRawCount
+      : MAX_RAW_TIMINGS_UPLOAD;
 
-  if (xCloudQueue != NULL) {
-    xQueueSend(xCloudQueue, &msg, 0);
+  // rawbuf[0] là khoảng gap trước frame, không phải dữ liệu phát lại.
+  for (uint16_t i = 1; i <= rawCount; i++) {
+    raw.add(static_cast<uint32_t>(results.rawbuf[i]) * kRawTick);
+  }
+
+  doc["rawCount"] = rawCount;
+  doc["rawTruncated"] = (results.rawlen > rawCount + 1);
+  doc["captureBufferSize"] = IR_CAPTURE_BUFFER_SIZE;
+
+  String payload;
+  payload.reserve(12000);
+  serializeJson(doc, payload);
+
+  const HttpResponse response = httpPostJson(
+    "/devices/" + deviceId +
+      "/profiles/" + learning.profileId +
+      "/learned-signals",
+    payload,
+    true
+  );
+
+  if (response.code < 200 || response.code >= 300) {
+    Serial.printf(
+      "Upload IR learned that bai HTTP=%d, body=%s\n",
+      response.code,
+      response.body.c_str()
+    );
+    return false;
   }
 
   // Cache tối thiểu hồ sơ gần nhất trên ESP32.
@@ -1248,7 +1215,7 @@ bool uploadLearnedSignal(const decode_results &results) {
     (commonDecoded && nativeSendSupported) ? "NATIVE" : "RAW"
   );
 
-  Serial.println("Da day tin hoc IR vao CloudQueue de gui len server.");
+  Serial.println("Da gui ket qua hoc IR len server.");
   Serial.print("Protocol: ");
   Serial.println(protocolName);
   Serial.print("Control type: ");
@@ -1546,137 +1513,110 @@ bool sendRawSignal(JsonObject command, String &errorMessage) {
 // XỬ LÝ COMMAND TỪ SERVER
 // ============================================================
 
-// ============================================================
-// XỬ LÝ COMMAND TỪ SERVER (CHẠY TRÊN CORE 1)
-// ============================================================
+void processCommand(JsonObject command) {
+  const String commandId = command["id"] | "";
+  const String type = command["type"] | "";
 
-void processCommandMsg(const CommandMsg &cmd) {
-  if (strlen(cmd.id) == 0) {
+  if (commandId.isEmpty() || type.isEmpty()) {
+    Serial.println("Command thieu id/type.");
     return;
   }
 
-  static String s_lastExecutedCmdId = "";
-  if (String(cmd.id) == s_lastExecutedCmdId) {
-    Serial.printf("[Core 1] Command ID=%s trung lap, bo qua.\n", cmd.id);
+  if (commandId == lastCommandId) {
+    Serial.println("Command trung lap, bo qua.");
     return;
   }
-  s_lastExecutedCmdId = cmd.id;
 
   Serial.println();
-  Serial.printf("[Core 1] Thuc thi Command: ID=%s, Type=%d\n", cmd.id, cmd.type);
+  Serial.print("Nhan command: ");
+  Serial.print(type);
+  Serial.print(" / ");
+  Serial.println(commandId);
 
-  if (cmd.type == CMD_START_LEARNING) {
-    if (strlen(cmd.profileId) == 0) {
-      acknowledgeCommand(cmd.id, "failed", "Missing profileId");
+  if (type == "START_LEARNING") {
+    const String profileId = command["profileId"] | "";
+    const String expectedAction = command["expectedAction"] | "UNKNOWN";
+    const unsigned long timeoutSeconds = command["timeoutSeconds"] | 45;
+
+    if (profileId.isEmpty()) {
+      acknowledgeCommand(commandId, "failed", "Missing profileId");
       return;
     }
 
     startLearning(
-      cmd.id,
-      cmd.profileId,
-      cmd.expectedAction,
-      cmd.timeoutSeconds * 1000UL
+      commandId,
+      profileId,
+      expectedAction,
+      timeoutSeconds * 1000UL
     );
 
-    acknowledgeCommand(cmd.id, "accepted", "Waiting for original remote");
+    // Command được nhận, nhưng chỉ completed sau khi nhận và upload IR.
+    acknowledgeCommand(commandId, "accepted", "Waiting for original remote");
     return;
   }
 
-  if (cmd.type == CMD_CANCEL_LEARNING) {
+  if (type == "CANCEL_LEARNING") {
     cancelLearning("Cancelled by server");
-    acknowledgeCommand(cmd.id, "completed", "Learning cancelled");
+    acknowledgeCommand(commandId, "completed", "Learning cancelled");
     return;
   }
 
-  if (cmd.type == CMD_SET_AC_STATE) {
-    StaticJsonDocument<512> dummyDoc;
-    dummyDoc["protocol"] = cmd.protocol;
-    dummyDoc["power"] = cmd.power;
-    dummyDoc["temperature"] = cmd.temperature;
-    dummyDoc["mode"] = cmd.mode;
-    dummyDoc["fan"] = cmd.fan;
-    dummyDoc["swingV"] = cmd.swingV;
-    showCommandEvent(dummyDoc.as<JsonObject>(), "SET_AC_STATE");
-
+  if (type == "SET_AC_STATE") {
+    showCommandEvent(command, type);
     String errorMessage;
-    const bool ok = sendNativeAcState(dummyDoc.as<JsonObject>(), errorMessage);
+    const bool ok = sendNativeAcState(command, errorMessage);
     updateCommandEventResult(ok);
 
     acknowledgeCommand(
-      cmd.id,
+      commandId,
       ok ? "completed" : "failed",
       ok ? "Native A/C state sent" : errorMessage
     );
     return;
   }
 
-  if (cmd.type == CMD_SEND_RAW) {
-    StaticJsonDocument<512> dummyDoc;
-    dummyDoc["protocol"] = cmd.protocol;
-    dummyDoc["code"] = cmd.codeStr;
-    dummyDoc["bits"] = cmd.bits;
-    dummyDoc["repeatCount"] = cmd.repeatCount;
-    dummyDoc["address"] = cmd.address;
-    dummyDoc["commandCode"] = cmd.commandCode;
-    showCommandEvent(dummyDoc.as<JsonObject>(), "SEND_RAW");
-
+  if (type == "SEND_RAW") {
+    showCommandEvent(command, type);
     String errorMessage;
-    bool ok = false;
-
-    if (cmd.rawCount > 0) {
-      irReceiver.disableIRIn();
-      yield();
-      irSender.sendRaw(cmd.rawUs, cmd.rawCount, cmd.frequencyKhz);
-      delay(50);
-      if (!learning.active) {
-        irReceiver.enableIRIn();
-        irReceiver.resume();
-      }
-      ok = true;
-      Serial.printf("[IR TRANSMIT] Sent via RAW us (count=%d, freq=%d kHz)\n", cmd.rawCount, cmd.frequencyKhz);
-    } else {
-      ok = sendRawSignal(dummyDoc.as<JsonObject>(), errorMessage);
-    }
-
+    const bool ok = sendRawSignal(command, errorMessage);
     updateCommandEventResult(ok);
 
     acknowledgeCommand(
-      cmd.id,
+      commandId,
       ok ? "completed" : "failed",
       ok ? "Raw IR signal sent" : errorMessage
     );
     return;
   }
 
-  if (cmd.type == CMD_RESET_WIFI) {
-    acknowledgeCommand(cmd.id, "completed", "Wi-Fi settings cleared");
+  if (type == "RESET_WIFI") {
+    acknowledgeCommand(commandId, "completed", "Wi-Fi settings cleared");
     wifiManager.resetSettings();
     ESP.restart();
     return;
   }
 
-  if (cmd.type == CMD_FACTORY_RESET) {
-    acknowledgeCommand(cmd.id, "completed", "Factory reset requested");
+  if (type == "FACTORY_RESET") {
+    acknowledgeCommand(commandId, "completed", "Factory reset requested");
     wifiManager.resetSettings();
     preferences.clear();
     ESP.restart();
     return;
   }
 
-  if (cmd.type == CMD_PING) {
-    acknowledgeCommand(cmd.id, "completed", "PONG");
+  if (type == "PING") {
+    acknowledgeCommand(commandId, "completed", "PONG");
     return;
   }
 
-  acknowledgeCommand(cmd.id, "failed", "Unsupported command type");
+  acknowledgeCommand(commandId, "failed", "Unsupported command type");
 }
 
 void pollNextCommand() {
-  char path[128];
+  String path = "/devices/" + deviceId + "/commands/next";
+
   if (!lastCommandId.isEmpty()) {
-    snprintf(path, sizeof(path), "/devices/%s/commands/next?after=%s", deviceId.c_str(), lastCommandId.c_str());
-  } else {
-    snprintf(path, sizeof(path), "/devices/%s/commands/next", deviceId.c_str());
+    path += "?after=" + lastCommandId;
   }
 
   const HttpResponse response = httpGetJson(path, true);
@@ -1695,20 +1635,21 @@ void pollNextCommand() {
   }
 
   if (response.code != 200) {
+    Serial.printf("Poll command loi HTTP=%d\n", response.code);
     return;
   }
 
-  Serial.printf("[Poll HTTP 200] Body: %s\n", response.body.c_str());
-
-  DynamicJsonDocument doc(12288);
+  DynamicJsonDocument doc(24576);
   const DeserializationError error = deserializeJson(doc, response.body);
 
   if (error) {
-    Serial.printf("[Poll Error] Lỗi parse JSON: %s\n", error.c_str());
+    Serial.print("JSON command loi: ");
+    Serial.println(error.c_str());
     return;
   }
 
   JsonObject command = doc.as<JsonObject>();
+
   if (doc["command"].is<JsonObject>()) {
     command = doc["command"].as<JsonObject>();
   }
@@ -1717,119 +1658,7 @@ void pollNextCommand() {
     return;
   }
 
-  const String commandId = command["id"] | "";
-  const String type = command["type"] | "";
-
-  if (commandId.isEmpty() || type.isEmpty()) {
-    return;
-  }
-
-  if (commandId == lastCommandId) {
-    Serial.printf("[Poll] Command ID=%s trung voi lastCommandId (%s), bo qua.\n", commandId.c_str(), lastCommandId.c_str());
-    return;
-  }
-
-  // Ghi nhận ngay lập tức ID lệnh vừa nhận để lần poll sau (sau 2s) truyền after=lastCommandId
-  lastCommandId = commandId;
-  preferences.putString("lastCmd", lastCommandId);
-
-  Serial.printf("[Core 0] Nhan Command tu Cloud: ID=%s, Type=%s -> Day vao Queue\n", commandId.c_str(), type.c_str());
-
-  CommandMsg cmdMsg;
-  strncpy(cmdMsg.id, commandId.c_str(), sizeof(cmdMsg.id) - 1);
-  strncpy(cmdMsg.profileId, command["profileId"] | "", sizeof(cmdMsg.profileId) - 1);
-  strncpy(cmdMsg.expectedAction, command["expectedAction"] | "UNKNOWN", sizeof(cmdMsg.expectedAction) - 1);
-  cmdMsg.timeoutSeconds = command["timeoutSeconds"] | 45;
-
-  if (type == "START_LEARNING") cmdMsg.type = CMD_START_LEARNING;
-  else if (type == "CANCEL_LEARNING") cmdMsg.type = CMD_CANCEL_LEARNING;
-  else if (type == "SET_AC_STATE") cmdMsg.type = CMD_SET_AC_STATE;
-  else if (type == "SEND_RAW") cmdMsg.type = CMD_SEND_RAW;
-  else if (type == "RESET_WIFI") cmdMsg.type = CMD_RESET_WIFI;
-  else if (type == "FACTORY_RESET") cmdMsg.type = CMD_FACTORY_RESET;
-  else if (type == "PING") cmdMsg.type = CMD_PING;
-
-  strncpy(cmdMsg.protocol, command["protocol"] | "", sizeof(cmdMsg.protocol) - 1);
-  strncpy(cmdMsg.codeStr, command["code"] | "", sizeof(cmdMsg.codeStr) - 1);
-  cmdMsg.bits = command["bits"] | 0;
-  cmdMsg.repeatCount = command["repeatCount"] | 0;
-  cmdMsg.address = command["address"] | 0;
-  cmdMsg.commandCode = command["commandCode"] | 0;
-  cmdMsg.power = command["power"] | false;
-  cmdMsg.temperature = command["temperature"] | 26.0;
-  strncpy(cmdMsg.mode, command["mode"] | "auto", sizeof(cmdMsg.mode) - 1);
-  strncpy(cmdMsg.fan, command["fan"] | "auto", sizeof(cmdMsg.fan) - 1);
-  strncpy(cmdMsg.swingV, command["swingV"] | "off", sizeof(cmdMsg.swingV) - 1);
-
-  cmdMsg.frequencyKhz = command["frequencyKhz"] | 38;
-  JsonArray rawArr = command["rawUs"].as<JsonArray>();
-  if (!rawArr.isNull()) {
-    cmdMsg.rawCount = 0;
-    for (uint16_t val : rawArr) {
-      if (cmdMsg.rawCount < 350) {
-        cmdMsg.rawUs[cmdMsg.rawCount++] = val;
-      }
-    }
-  }
-
-  if (xCommandQueue != NULL) {
-    xQueueSend(xCommandQueue, &cmdMsg, 0);
-  }
-}
-
-void processCloudQueue() {
-  CloudMsg msg;
-  while (xCloudQueue != NULL && xQueueReceive(xCloudQueue, &msg, 0) == pdTRUE) {
-    if (msg.type == CLOUD_ACK_COMMAND) {
-      StaticJsonDocument<384> doc;
-      doc["status"] = msg.status;
-      doc["message"] = msg.message;
-      doc["deviceTimeMs"] = millis();
-
-      char payload[384];
-      serializeJson(doc, payload, sizeof(payload));
-
-      char path[128];
-      snprintf(path, sizeof(path), "/devices/%s/commands/%s/ack", deviceId.c_str(), msg.commandId);
-
-      const HttpResponse response = httpPostJson(path, payload, true);
-      if (response.code >= 200 && response.code < 300) {
-        lastCommandId = String(msg.commandId);
-        preferences.putString("lastCmd", lastCommandId);
-      }
-    } else if (msg.type == CLOUD_UPLOAD_LEARNED_SIGNAL) {
-      DynamicJsonDocument doc(4096);
-      doc["event"] = "IR_SIGNAL_LEARNED";
-      doc["deviceId"] = deviceId;
-      doc["commandId"] = msg.commandId;
-      doc["profileId"] = msg.profileId;
-      doc["expectedAction"] = msg.expectedAction;
-      doc["protocol"] = msg.protocol;
-      doc["bits"] = msg.bits;
-      doc["code"] = msg.codeHex;
-      doc["address"] = msg.address;
-      doc["commandCode"] = msg.commandCode;
-      doc["repeatCount"] = msg.repeat ? 1 : 0;
-      doc["stateHex"] = msg.stateHex;
-      doc["description"] = msg.description;
-      doc["nativeSendSupported"] = msg.nativeSendSupported;
-      doc["commonDecoded"] = msg.commonDecoded;
-      doc["controlType"] = (msg.commonDecoded && msg.nativeSendSupported) ? "NATIVE" : "RAW";
-
-      JsonArray raw = doc.createNestedArray("rawUs");
-      for (uint16_t i = 0; i < msg.rawCount; i++) {
-        raw.add(msg.rawUs[i]);
-      }
-
-      String payload;
-      payload.reserve(3072);
-      serializeJson(doc, payload);
-
-      char path[128];
-      snprintf(path, sizeof(path), "/devices/%s/profiles/%s/learned-signals", deviceId.c_str(), msg.profileId);
-      httpPostJson(path, payload, true);
-    }
-  }
+  processCommand(command);
 }
 
 // ============================================================
@@ -1855,13 +1684,6 @@ void setup() {
   Serial.println(devicePaired ? "PAIRED" : "NOT PAIRED");
   Serial.println("========================================");
 
-  // Khởi tạo HTTP client duy nhất một lần
-  initHttpClient();
-
-  // Khởi tạo Queues 2 chiều cho Core 0 (Network) và Core 1 (IR/OLED)
-  xCommandQueue = xQueueCreate(10, sizeof(CommandMsg));
-  xCloudQueue = xQueueCreate(10, sizeof(CloudMsg));
-
   // Khởi tạo màn hình OLED SSD1306 qua I2C (SDA=21, SCL=22, Address=0x3C)
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN);
   Wire.beginTransmission(OLED_I2C_ADDRESS);
@@ -1886,43 +1708,6 @@ void setup() {
 
   lastCommandPollAt = millis();
   lastHeartbeatAt = millis();
-
-  // Khởi tạo Network Task ĐỘC QUYỀN HTTP trên CORE 0
-  xTaskCreatePinnedToCore(
-    [](void *pvParameters) {
-      Serial.println("[FreeRTOS] Network Task khoi chay thanh cong tren Core 0 (Chuu quyen HTTP)");
-      for (;;) {
-        if (WiFi.status() == WL_CONNECTED) {
-          ensureDeviceRegistered();
-          if (!deviceToken.isEmpty()) {
-            const unsigned long now = millis();
-
-            // 1. Poll command tu server va nạp vao CommandQueue
-            if (now - lastCommandPollAt >= COMMAND_POLL_INTERVAL_MS) {
-              lastCommandPollAt = now;
-              pollNextCommand();
-            }
-
-            // 2. Gui phan hoi ACK va upload IR signal tu CloudQueue
-            processCloudQueue();
-
-            // 3. Gui heartbeat
-            if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
-              lastHeartbeatAt = now;
-              sendHeartbeat();
-            }
-          }
-        }
-        vTaskDelay(pdMS_TO_TICKS(50));
-      }
-    },
-    "NetworkTask",
-    16384, // Tăng Stack lên 16KB cho HTTPS (mbedTLS) + JSON Parsing
-    NULL,
-    1,
-    NULL,
-    0
-  );
 }
 
 void loop() {
@@ -1939,16 +1724,31 @@ void loop() {
 
   processWiFiManager();
   maintainWiFi();
-
-  // Nhận command từ Core 0 va thuc thi tren Core 1
-  CommandMsg cmd;
-  if (xCommandQueue != NULL && xQueueReceive(xCommandQueue, &cmd, 0) == pdTRUE) {
-    processCommandMsg(cmd);
-  }
-
   processIrReceiver();
   processLearningTimeout();
   processDisplayFsm(now);
+
+  if (WiFi.status() != WL_CONNECTED) {
+    yield();
+    return;
+  }
+
+  ensureDeviceRegistered();
+
+  if (deviceToken.isEmpty()) {
+    yield();
+    return;
+  }
+
+  if (now - lastCommandPollAt >= COMMAND_POLL_INTERVAL_MS) {
+    lastCommandPollAt = now;
+    pollNextCommand();
+  }
+
+  if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
+    lastHeartbeatAt = now;
+    sendHeartbeat();
+  }
 
   yield();
 }
