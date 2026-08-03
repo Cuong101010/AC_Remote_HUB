@@ -742,9 +742,10 @@ bool sendEncodedSignal(const CommandMsg &cmd, String &errorMessage) {
 void controlTaskLoop(void *pvParameters) {
   Serial.println("[FreeRTOS] Control Task running on Core 1 (IR & OLED)");
 
-  silenceReceiverForTx();
   irSender.begin();
-  reArmReceiverAfterTx();
+  irReceiver.enableIRIn();
+  irReceiver.setUnknownThreshold(12);
+  IRac::initState(&previousAcState);
 
   CommandMsg cmd;
 
