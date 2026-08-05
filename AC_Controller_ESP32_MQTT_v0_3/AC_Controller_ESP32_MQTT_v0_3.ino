@@ -678,8 +678,8 @@ void loop() {
     ensureDeviceRegistered();
     maintainMqttConnection();
 
-    // Polling HTTP dư phòng nếu MQTT không sẵn sàng
-    if (!mqttClient.connected() && now - lastCommandPollAt >= COMMAND_POLL_INTERVAL_MS) {
+    // Polling HTTP dự phòng nhận lệnh từ Server (nếu MQTT trên Cloud bị nghẽn port)
+    if (now - lastCommandPollAt >= COMMAND_POLL_INTERVAL_MS) {
       lastCommandPollAt = now;
       pollNextCommand();
     }
