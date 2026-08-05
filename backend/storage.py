@@ -271,6 +271,11 @@ class Storage:
 
     def get_next_pending_command(self, device_id, after_id=None):
         with self.lock:
+            if after_id:
+                after_exists = any(cmd.get("id") == after_id for cmd in self.commands if cmd.get("deviceId") == device_id)
+                if not after_exists:
+                    after_id = None
+
             found_after = False if after_id else True
             for cmd in self.commands:
                 if cmd.get("deviceId") != device_id:
