@@ -222,18 +222,40 @@ class StorageMqtt:
 
     def pair_device(self, device_id_or_code, user=None):
         with self.lock:
+            target_dev_id = None
             for dev_id, dev in self.devices.items():
                 if dev_id == device_id_or_code or dev.get("pairingCode") == device_id_or_code:
-                    dev["paired"] = True
-                    if user:
-                        dev["ownedByUserId"] = user["userId"]
-                        username = user["username"]
-                        u = self.users.get(username)
-                        if u and dev_id not in u.get("deviceIds", []):
-                            u.setdefault("deviceIds", []).append(dev_id)
-                            self._save_json(self.users_file, self.users)
-                    self._save_json(self.devices_file, self.devices)
-                    return dict(dev)
+                    target_dev_id = dev_id
+                    break
+
+            # Neu khong tim thay (do Vercel /tmp reset), tu dong dang ky thiet bi theo ID
+            if not target_dev_id and (device_id_or_code.startswith("ACIR-") or len(device_id_or_code) >= 6):
+                target_dev_id = device_id_or_code if device_id_or_code.startswith("ACIR-") else f"ACIR-{device_id_or_code}"
+                self.devices[target_dev_id] = {
+                    "deviceId":        target_dev_id,
+                    "deviceToken":     f"tok_{uuid.uuid4().hex}",
+                    "pairingCode":     device_id_or_code if len(device_id_or_code) == 6 else "123456",
+                    "paired":          True,
+                    "firmwareVersion": "0.3.0-MQTT",
+                    "registeredAt":    time.time(),
+                    "lastSeen":        time.time(),
+                    "online":          True,
+                    "status":          "online",
+                    "mqttBroker":      "broker.hivemq.com"
+                }
+
+            if target_dev_id and target_dev_id in self.devices:
+                dev = self.devices[target_dev_id]
+                dev["paired"] = True
+                if user:
+                    dev["ownedByUserId"] = user["userId"]
+                    username = user["username"]
+                    u = self.users.get(username)
+                    if u and target_dev_id not in u.get("deviceIds", []):
+                        u.setdefault("deviceIds", []).append(target_dev_id)
+                        self._save_json(self.users_file, self.users)
+                self._save_json(self.devices_file, self.devices)
+                return dict(dev)
             return None
 
     def add_command(self, device_id, cmd_type, cmd_payload):
