@@ -181,7 +181,7 @@ decode_type_t previousProtocol = decode_type_t::UNKNOWN;
 void renderDisplay();
 void setDisplayState(const DisplayState nextState, const bool renderNow = true);
 void goToBaseDisplayState();
-void processCommand(JsonObject command);
+void processCommand(JsonObject command, const char* source = "MQTT Instant ⚡");
 void acknowledgeCommand(const String &commandId, const String &status, const String &message);
 void publishMqttSensorData();
 void publishMqttHeartbeat();
@@ -555,7 +555,7 @@ void acknowledgeCommand(const String &commandId, const String &status, const Str
   }
 }
 
-void processCommand(JsonObject command) {
+void processCommand(JsonObject command, const char* source = "MQTT Instant ⚡") {
   const String commandId = command["id"] | "";
   const String type      = command["type"] | "";
 
@@ -563,7 +563,11 @@ void processCommand(JsonObject command) {
   if (commandId == lastCommandId) return; // Bo qua lenh trùng
   lastCommandId = commandId;
 
-  Serial.printf("\n⚡⚡⚡ [EXECUTE COMMAND] Type: %s | ID: %s\n", type.c_str(), commandId.c_str());
+  Serial.println("\n========================================");
+  Serial.printf("➡️ NHẬN LỆNH QUA KÊNH: %s\n", source);
+  Serial.printf("   Command ID : %s\n", commandId.c_str());
+  Serial.printf("   Type       : %s\n", type.c_str());
+  Serial.println("========================================");
 
   if (type == "SET_AC_STATE") {
     commandScreen.commandType = type;
@@ -578,7 +582,7 @@ void processCommand(JsonObject command) {
     commandScreen.resultOk = ok;
     displayDirty = true;
 
-    acknowledgeCommand(commandId, ok ? "completed" : "failed", ok ? "Native AC IR Sent OK" : errorMsg);
+    acknowledgeCommand(commandId, ok ? "completed" : "failed", ok ? String(source) + " - Native AC IR Sent OK" : errorMsg);
     return;
   }
 
@@ -594,7 +598,7 @@ void processCommand(JsonObject command) {
     commandScreen.resultOk = ok;
     displayDirty = true;
 
-    acknowledgeCommand(commandId, ok ? "completed" : "failed", ok ? "Raw IR Signal Sent OK" : errorMsg);
+    acknowledgeCommand(commandId, ok ? "completed" : "failed", ok ? String(source) + " - Raw IR Signal Sent OK" : errorMsg);
     return;
   }
 }
@@ -609,7 +613,7 @@ void pollNextCommand() {
     DynamicJsonDocument doc(4096);
     if (!deserializeJson(doc, res.body)) {
       JsonObject cmd = doc["command"].is<JsonObject>() ? doc["command"].as<JsonObject>() : doc.as<JsonObject>();
-      if (!cmd.isNull() && cmd.size() > 0) processCommand(cmd);
+      if (!cmd.isNull() && cmd.size() > 0) processCommand(cmd, "HTTP Polling 🔄");
     }
   }
 }
