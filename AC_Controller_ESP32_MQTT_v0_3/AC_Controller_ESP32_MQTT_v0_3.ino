@@ -555,7 +555,7 @@ void acknowledgeCommand(const String &commandId, const String &status, const Str
   }
 }
 
-void processCommand(JsonObject command, const char* source = "MQTT Instant ⚡") {
+void processCommand(JsonObject command, const char* source) {
   const String commandId = command["id"] | "";
   const String type      = command["type"] | "";
 
