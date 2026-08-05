@@ -6,9 +6,9 @@ import hashlib
 import threading
 
 if "VERCEL" in os.environ:
-    DATA_DIR = "/tmp/data_mqtt"
+    DATA_DIR = "/tmp/data"
 else:
-    DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+    DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend", "data"))
 
 class StorageMqtt:
     def __init__(self):
