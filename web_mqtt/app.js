@@ -347,7 +347,10 @@ async function handleAddProfile() {
 }
 
 async function sendAcControlCommand() {
-    if (!state.activeDeviceId) return;
+    if (!state.activeDeviceId) {
+        showToast("⚠️ Bạn chưa chọn thiết bị! Vui lòng ghép nối thiết bị trong tab 'Thiết Bị'.", true);
+        return;
+    }
 
     const payload = {
         profileId:   state.activeProfileId || "default_profile",

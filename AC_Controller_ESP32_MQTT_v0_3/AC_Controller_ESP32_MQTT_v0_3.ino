@@ -604,7 +604,11 @@ void processCommand(JsonObject command, const char* source) {
 }
 
 void pollNextCommand() {
-  if (WiFi.status() != WL_CONNECTED || deviceToken.isEmpty()) return;
+  if (WiFi.status() != WL_CONNECTED) return;
+  if (deviceToken.isEmpty()) {
+    ensureDeviceRegistered();
+    return;
+  }
   String path = "/devices/" + deviceId + "/commands/next";
   if (!lastCommandId.isEmpty()) path += "?after=" + lastCommandId;
 
