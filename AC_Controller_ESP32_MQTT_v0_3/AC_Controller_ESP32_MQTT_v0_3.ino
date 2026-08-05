@@ -178,6 +178,7 @@ String previousProfileId;
 decode_type_t previousProtocol = decode_type_t::UNKNOWN;
 
 // Khai báo hàm
+void renderDisplay();
 void setDisplayState(const DisplayState nextState, const bool renderNow = true);
 void goToBaseDisplayState();
 void processCommand(JsonObject command);
