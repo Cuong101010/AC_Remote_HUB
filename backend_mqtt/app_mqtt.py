@@ -33,13 +33,31 @@ def _mqtt_publish_worker(device_id, cmd):
     try:
         topic = f"acremote/devices/{device_id}/commands"
         payload = json.dumps({"command": cmd})
-        auth = None
-        if MQTT_BROKER_USER:
-            auth = {"username": MQTT_BROKER_USER, "password": MQTT_BROKER_PASS}
-        publish.single(topic, payload, hostname=MQTT_BROKER_HOST, port=MQTT_BROKER_PORT, auth=auth, qos=1)
-        print(f"⚡ [MQTT INSTANT PUSH] Published command {cmd['id']} to topic '{topic}'")
+
+        import paho.mqtt.client as mqtt
+        client_id = f"server_pub_{int(time.time()*1000)}"
+
+        # Khởi tạo paho-mqtt client dùng giao thức WebSockets (cho phép qua Port 8000/443 HTTP Proxy)
+        try:
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=client_id, transport="websockets")
+        except AttributeError:
+            client = mqtt.Client(client_id=client_id, transport="websockets")
+
+        # Cấu hình HTTP Proxy nếu chạy trên PythonAnywhere
+        if os.path.exists("/etc/pythonanywhere") or os.getenv("PYTHONANYWHERE_SITE"):
+            try:
+                import socks
+                client.proxy_set(proxy_type=socks.HTTP, proxy_addr="proxy.server", proxy_port=3128)
+            except Exception as pe:
+                print(f"[MQTT Proxy Note] {pe}")
+
+        client.ws_set_options(path="/mqtt")
+        client.connect(MQTT_BROKER_HOST, 8000, 30)
+        client.publish(topic, payload, qos=1)
+        client.disconnect()
+        print(f"⚡ [MQTT INSTANT PUSH 443/WebSocket] Published command {cmd['id']} to topic '{topic}'")
     except Exception as e:
-        print(f"[MQTT Push Error] {e}")
+        print(f"[MQTT WebSocket Push Warning] {e}")
 
 def publish_mqtt_command(device_id, cmd):
     """Gửi lệnh tức thì không chặn (Non-blocking background thread) qua MQTT Broker."""
