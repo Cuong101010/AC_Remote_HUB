@@ -50,7 +50,7 @@
 static const char *FW_VERSION = "0.3.0-MQTT";
 
 // API Server HTTP & MQTT Broker
-static const char *API_BASE_URL        = "https://accontrollerremote.pythonanywhere.com/api/v1";
+static const char *API_BASE_URL        = "https://ac-remote-hub-hf34.vercel.app/api/v1";
 static const char *DEVICE_BOOTSTRAP_KEY= "CHANGE_ME_BOOTSTRAP_KEY";
 static const char *CONFIG_AP_PASSWORD  = ""; // Chuỗi rỗng = Open AP
 
@@ -360,6 +360,7 @@ void maintainMqttConnection() {
 
 String apiUrl(const String &path) {
   String base(API_BASE_URL);
+  base.replace("//api", "/api");
   while (base.endsWith("/")) base.remove(base.length() - 1);
   return path.startsWith("/") ? base + path : base + "/" + path;
 }
